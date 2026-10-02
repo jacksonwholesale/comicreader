@@ -1,0 +1,202 @@
+import { ArrowDown, ArrowUp, BookOpen, ChevronLeft, Cloud, CloudOff, FolderPlus, Sparkles, Trash2, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import type { Collection, Comic, SmartRule } from '../db';
+import { isConnected } from '../lib/drive';
+import { go } from '../lib/hooks';
+import { collectionMembers, createCollection, deleteCollection, removeFromCollection, statusOf, updateCollection } from '../lib/library';
+import { processDriveQueue } from '../lib/sync';
+import { useLibrary } from '../lib/useLibrary';
+import { ComicCard, Cover } from '../components/ComicCard';
+import { Toggle } from '../components/reader/ReaderSettings';
+
+export function Collections() {
+  const { comics, progress, collections } = useLibrary();
+  const all = comics ?? [];
+  const sorted = [...collections].sort((a, b) => a.name.localeCompare(b.name));
+  const make = async (smart: boolean) => {
+    const name = prompt(smart ? 'Name for the smart collection' : 'Name for the new collection');
+    if (!name) return;
+    const id = await createCollection(name, smart ? { smart: { status: 'any' } } : {});
+    go(`collection/${id}`);
+  };
+  return (
+    <div className="view">
+      <header className="view-head">
+        <h1>Collections</h1>
+        <div className="row gap">
+          <button className="btn" onClick={() => void make(true)}><Sparkles size={18} /><span className="hide-mobile">Smart collection</span></button>
+          <button className="btn primary" onClick={() => void make(false)}><FolderPlus size={18} /><span className="hide-mobile">New collection</span></button>
+        </div>
+      </header>
+      {!sorted.length ? (
+        <div className="empty">
+          <FolderPlus size={44} strokeWidth={1.3} />
+          <h2>Group comics your way</h2>
+          <p className="muted">
+            Collections are ordered reading lists — events, runs, crossovers, "to read next". Smart collections fill themselves from rules. Turn on
+            Drive sync for a collection and its comics follow you to every device.
+          </p>
+        </div>
+      ) : (
+        <div className="grid wide">
+          {sorted.map((col) => {
+            const members = collectionMembers(col, all, progress);
+            const read = members.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
+            return (
+              <button key={col.id} className="card collection-card" onClick={() => go(`collection/${col.id}`)}>
+                <div className="mosaic">
+                  {members.slice(0, 4).map((c) => <Cover key={c.id} comic={c} />)}
+                  {!members.length && <div className="cover-blank">{col.name.slice(0, 1)}</div>}
+                </div>
+                <div className="card-meta">
+                  <strong>
+                    {col.smart && <Sparkles size={14} className="accent" />} {col.name} {col.driveSync ? <Cloud size={14} className="muted" /> : null}
+                  </strong>
+                  <span>{members.length} comics · {read} read</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead: (id: string) => void; onDetail: (c: Comic) => void }) {
+  const { comics, progress, collections } = useLibrary();
+  const col = collections.find((c) => c.id === id);
+  const all = comics ?? [];
+  const members = useMemo(() => (col ? collectionMembers(col, all, progress) : []), [col, all, progress]);
+  const [editRules, setEditRules] = useState(false);
+
+  if (!col) return <div className="view"><p className="muted pad">Collection not found.</p></div>;
+
+  const read = members.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
+  const nextUp = members.find((c) => statusOf(progress.get(c.id)) === 'reading') ?? members.find((c) => statusOf(progress.get(c.id)) === 'unread');
+  const notInDrive = members.filter((c) => c.hasFile && !c.driveFileId).length;
+  const move = (i: number, d: number) => {
+    const ids = [...col.comicIds];
+    const j = i + d;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    void updateCollection(col.id, { comicIds: ids });
+  };
+
+  return (
+    <div className="view">
+      <header className="view-head">
+        <button className="icon-btn" onClick={() => go('collections')} aria-label="Back"><ChevronLeft /></button>
+        <h1 className="editable" contentEditable suppressContentEditableWarning onBlur={(e) => {
+          const name = e.currentTarget.textContent?.trim();
+          if (name && name !== col.name) void updateCollection(col.id, { name });
+        }}>{col.name}</h1>
+        <button
+          className="icon-btn danger"
+          aria-label="Delete collection"
+          onClick={() => confirm(`Delete the collection "${col.name}"? The comics stay in your library.`) && void deleteCollection(col.id).then(() => go('collections'))}
+        >
+          <Trash2 />
+        </button>
+      </header>
+
+      <div className="collection-summary">
+        <div className="stat-line">
+          <span><strong>{members.length}</strong> comics</span>
+          <span><strong>{read}</strong> read</span>
+          {members.length > 0 && <div className="progress-bar inline"><i style={{ width: `${(read / members.length) * 100}%` }} /></div>}
+        </div>
+        <div className="row gap wrap">
+          {nextUp && nextUp.hasFile && (
+            <button className="btn primary" onClick={() => onRead(nextUp.id)}><BookOpen size={18} /> {statusOf(progress.get(nextUp.id)) === 'reading' ? 'Continue' : 'Start'}: {nextUp.title}</button>
+          )}
+          {col.smart && <button className="btn" onClick={() => setEditRules((v) => !v)}><Sparkles size={18} /> Rules</button>}
+        </div>
+        <div className="drive-toggle">
+          <Toggle
+            label="Sync this collection's comics to Google Drive"
+            value={!!col.driveSync}
+            onChange={(v) => {
+              void updateCollection(col.id, { driveSync: v ? 1 : 0 }).then(() => {
+                if (v) void processDriveQueue();
+              });
+            }}
+          />
+          <p className="muted small">
+            {!isConnected() ? (
+              <><CloudOff size={14} /> Connect Google Drive in Settings to use this.</>
+            ) : col.driveSync ? (
+              notInDrive ? `Uploading ${notInDrive} comic(s) so your other devices can download them…` : 'All comics here are in your Drive and available on every device.'
+            ) : (
+              'Progress and the collection itself always sync. Turn this on to also copy the comic files to Drive.'
+            )}
+          </p>
+        </div>
+        {editRules && col.smart && <RuleEditor col={col} />}
+      </div>
+
+      {col.smart ? (
+        <div className="grid">
+          {members.map((c) => (
+            <ComicCard key={c.id} comic={c} progress={progress.get(c.id)} onOpen={() => (c.hasFile ? onRead(c.id) : onDetail(c))} onSelect={() => onDetail(c)} />
+          ))}
+        </div>
+      ) : (
+        <ol className="reading-list">
+          {members.map((c, i) => {
+            const st = statusOf(progress.get(c.id));
+            return (
+              <li key={c.id} className={st}>
+                <span className="rl-num">{i + 1}</span>
+                <button className="rl-main" onClick={() => (c.hasFile ? onRead(c.id) : onDetail(c))}>
+                  <Cover comic={c} className="rl-cover" />
+                  <span className="rl-text">
+                    <strong>{c.title}</strong>
+                    <span className="muted small">
+                      {c.series}{c.number ? ` #${c.number}` : ''} · {st === 'finished' ? 'Read' : st === 'reading' ? 'In progress' : 'Unread'}
+                      {!c.hasFile ? ' · in Drive' : ''}
+                    </span>
+                  </span>
+                </button>
+                <div className="rl-actions">
+                  <button className="icon-btn tiny" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up"><ArrowUp size={16} /></button>
+                  <button className="icon-btn tiny" onClick={() => move(i, 1)} disabled={i === members.length - 1} aria-label="Move down"><ArrowDown size={16} /></button>
+                  <button className="icon-btn tiny" onClick={() => void removeFromCollection(col.id, [c.id])} aria-label="Remove from collection"><X size={16} /></button>
+                </div>
+              </li>
+            );
+          })}
+          {!members.length && <p className="muted pad">Add comics from the Library: tap Select, choose some, then "Collection".</p>}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function RuleEditor({ col }: { col: Collection }) {
+  const [r, setR] = useState<SmartRule>(col.smart ?? {});
+  const save = (patch: Partial<SmartRule>) => {
+    const next = { ...r, ...patch };
+    setR(next);
+    void updateCollection(col.id, { smart: next });
+  };
+  return (
+    <div className="rule-editor">
+      <label className="field"><span>Text contains</span><input value={r.text ?? ''} onChange={(e) => save({ text: e.target.value || undefined })} placeholder="e.g. Batman" /></label>
+      <label className="field"><span>Status</span>
+        <select value={r.status ?? 'any'} onChange={(e) => save({ status: e.target.value as SmartRule['status'] })}>
+          <option value="any">Any</option>
+          <option value="unread">Unread</option>
+          <option value="reading">In progress</option>
+          <option value="finished">Finished</option>
+        </select>
+      </label>
+      <label className="field"><span>Publisher</span><input value={r.publisher ?? ''} onChange={(e) => save({ publisher: e.target.value || undefined })} /></label>
+      <div className="row gap">
+        <label className="field"><span>Year from</span><input inputMode="numeric" value={r.yearFrom ?? ''} onChange={(e) => save({ yearFrom: Number(e.target.value) || undefined })} /></label>
+        <label className="field"><span>Year to</span><input inputMode="numeric" value={r.yearTo ?? ''} onChange={(e) => save({ yearTo: Number(e.target.value) || undefined })} /></label>
+      </div>
+      <Toggle label="Favorites only" value={!!r.favoritesOnly} onChange={(favoritesOnly) => save({ favoritesOnly })} />
+    </div>
+  );
+}

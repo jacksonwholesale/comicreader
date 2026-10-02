@@ -1,0 +1,42 @@
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { registerSW } from 'virtual:pwa-register';
+import { App } from './App';
+import { APP } from './config';
+import { go } from './lib/hooks';
+import { importFile } from './lib/importer';
+import { queueImport } from './lib/importQueue';
+import { startAutoSync } from './lib/sync';
+import './styles.css';
+
+document.title = APP.name;
+registerSW({ immediate: true });
+
+// Ask the browser not to evict the library under storage pressure.
+void navigator.storage?.persist?.();
+
+startAutoSync();
+
+// Desktop "Open with…" for the installed app (manifest file_handlers).
+if ('launchQueue' in window) {
+  (window as any).launchQueue.setConsumer(async (params: { files: FileSystemFileHandle[] }) => {
+    if (!params.files?.length) return;
+    const files = await Promise.all(params.files.map((h) => h.getFile()));
+    if (files.length === 1) {
+      try {
+        const { id } = await importFile(files[0], files[0].name);
+        go(`read/${id}`);
+        return;
+      } catch {
+        /* fall through to the queue, which reports the error */
+      }
+    }
+    queueImport(files.map((f) => ({ file: f, name: f.name, path: f.name })));
+  });
+}
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
