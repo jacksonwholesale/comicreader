@@ -75,7 +75,7 @@ export function Stats({ onRead }: { onRead: (id: string) => void }) {
             return (
               <li key={s.id}>
                 {c ? <Cover comic={c} className="session-cover" /> : <div className="cover session-cover" />}
-                <button className="grow session-main" disabled={!c?.hasFile} onClick={() => c && onRead(c.id)}>
+                <button className="grow session-main" disabled={!c?.hasFile && !c?.driveFileId} onClick={() => c && onRead(c.id)}>
                   <strong>{c?.title ?? 'Removed comic'}</strong>
                   <span className="muted small">
                     Pages {s.startPage + 1}–{s.endPage + 1} · {formatDuration(s.endedAt - s.startedAt)} · {s.deviceName}

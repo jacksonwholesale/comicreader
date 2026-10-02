@@ -25,10 +25,18 @@ A comic reader for phone and desktop that you install from the browser as an app
 
 **Reading history**: every reading session is logged with its device, time spent, and pages. The Reading tab shows totals, your streak, a 14-day chart, and time per device.
 
+**Drive library folders**: link one or more folders in your Google Drive (Settings → Library folders). Every comic in them, subfolders included, shows up in your library on every device.
+- **Read without downloading**: CBZ, EPUB and PDF stream page by page, fetching only what you look at. CBR, CB7 and CBT can't be read in pieces, so they're loaded whole into memory while open and nothing is saved.
+- **Download** any comic, a selection, or a whole collection for offline reading. **Remove download** frees the space; the comic stays in your library and keeps your place.
+- Covers, page counts and ComicInfo metadata are fetched automatically (only the first page for streamable formats).
+- New files you drop into the folder appear on the next scan (on launch, every ~10 minutes, or via **Rescan now**). Files you delete from Drive leave the library.
+- Removing a comic from the library never touches the file in your Drive.
+
 **Sync between phone and desktop** (through your Google Drive):
 - Progress, bookmarks, collections, reading sessions, metadata edits, and settings sync automatically: when the app opens, when you come back to it, a few seconds after changes, and when you close a comic.
 - If you're reading on one device and another device moves further ahead, you get a prompt like "Page 14 on Windows PC — Jump?".
-- Comic **files** only go to Drive when you upload them or put them in a Drive-synced collection. They're stored in `ComicReader/Comics` in your Drive. The app uses the `drive.file` scope, so it can only see files it created itself, never the rest of your Drive.
+- Comics you import on a device only go to Drive when you upload them or put them in a Drive-synced collection. They're stored in `ComicReader/Comics` in your Drive.
+- Permissions: `drive.appdata` (the hidden sync file), `drive.file` (comics the app uploads) and `drive.readonly` (to list and stream your linked folders). The app never edits or deletes anything in your Drive except files it uploaded itself. Because `drive.readonly` is a "restricted" scope, Google shows an "unverified app" screen when you allow folder access; for your own private app that's expected: choose **Advanced → Continue**.
 
 ## Running it
 

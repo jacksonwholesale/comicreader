@@ -10,6 +10,7 @@ import { connectDrive, disconnectDrive, syncNow } from '../lib/sync';
 import { device, markDirty } from '../lib/syncState';
 import { useSyncStatus } from '../lib/useLibrary';
 import { PrefControls, Seg } from '../components/reader/ReaderSettings';
+import { DriveFolders } from '../components/DriveFolders';
 
 export function Settings({ notify }: { notify: (m: string) => void }) {
   const prefs = usePrefs();
@@ -37,8 +38,9 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
       <section className="panel">
         <h2><Cloud size={20} /> Google Drive sync</h2>
         <p className="muted small">
-          Keeps reading progress, bookmarks, collections, reading sessions and settings in step between your phone and computer. Comic files are copied to a
-          “{APP.driveFolder}/Comics” folder in your Drive only when you upload them or turn on Drive sync for a collection. {APP.name} can only see files it created.
+          Keeps reading progress, bookmarks, collections, reading sessions and settings in step between your phone and computer. Link Drive folders below to
+          read the comics in them on any device. Comics you add from a device are copied to “{APP.driveFolder}/Comics” in your Drive only when you upload them
+          or turn on Drive sync for a collection. {APP.name} never edits or deletes anything in your Drive except the files it uploaded itself.
         </p>
         {!connected ? (
           <>
@@ -113,6 +115,7 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
                 <CloudOff size={16} /> Disconnect
               </button>
             </div>
+            <DriveFolders notify={notify} />
           </>
         )}
         <label className="field">

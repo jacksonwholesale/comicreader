@@ -52,14 +52,17 @@ export function ComicDetail({ comic, onClose, onRead, notify }: Props) {
               {status === 'unread' && <span className="pill">Unread</span>}
             </div>
             <div className="row gap wrap">
-              {comic.hasFile ? (
-                <button className="btn primary" onClick={() => onRead(comic.id)}>
-                  <BookOpen size={18} /> {status === 'reading' ? 'Continue' : status === 'finished' ? 'Read again' : 'Read'}
-                </button>
-              ) : comic.driveFileId ? (
-                <button className="btn primary" disabled={!!transfer && !transfer.error} onClick={() => act(() => downloadFromDrive(comic.id), 'Downloaded')}>
-                  <CloudDownload size={18} /> {transfer && !transfer.error ? `Downloading ${Math.round(transfer.progress * 100)}%` : 'Download from Drive'}
-                </button>
+              {comic.hasFile || comic.driveFileId ? (
+                <>
+                  <button className="btn primary" onClick={() => onRead(comic.id)}>
+                    <BookOpen size={18} /> {status === 'reading' ? 'Continue' : status === 'finished' ? 'Read again' : 'Read'}
+                  </button>
+                  {!comic.hasFile && (
+                    <button className="btn" disabled={!!transfer && !transfer.error} onClick={() => act(() => downloadFromDrive(comic.id), 'Downloaded — available offline')}>
+                      <CloudDownload size={18} /> {transfer && !transfer.error ? `${Math.round(transfer.progress * 100)}%` : 'Download'}
+                    </button>
+                  )}
+                </>
               ) : (
                 <p className="muted small">This comic's file is on another device. Upload it to Drive from there (or add it to a Drive-synced collection) to read it here.</p>
               )}
@@ -87,17 +90,20 @@ export function ComicDetail({ comic, onClose, onRead, notify }: Props) {
             </button>
           )}
           {comic.hasFile && comic.driveFileId ? (
-            <button onClick={() => act(() => removeDownload(comic.id), 'Removed from this device — still in Drive')}><HardDriveDownload size={18} /> Remove download (keep in Drive)</button>
+            <button onClick={() => act(() => removeDownload(comic.id), 'Removed from this device — still streams from Drive')}><HardDriveDownload size={18} /> Remove download (stays in Drive)</button>
           ) : null}
           <button
             className="danger"
             onClick={() => {
-              if (confirm(`Delete "${comic.title}" from your library on all devices${comic.driveFileId ? ' and from Google Drive' : ''}?`)) {
+              const msg = comic.driveFolderId
+                ? `Remove "${comic.title}" from your library on all devices? The file stays in your Google Drive folder.`
+                : `Delete "${comic.title}" from your library on all devices${comic.driveFileId ? ' and from Google Drive' : ''}?`;
+              if (confirm(msg)) {
                 void deleteComics([comic.id]).then(onClose);
               }
             }}
           >
-            <Trash2 size={18} /> Delete
+            <Trash2 size={18} /> {comic.driveFolderId ? 'Remove from library' : 'Delete'}
           </button>
         </div>
 
@@ -108,7 +114,13 @@ export function ComicDetail({ comic, onClose, onRead, notify }: Props) {
           <div><dt>Added</dt><dd>{new Date(comic.addedAt).toLocaleDateString()}</dd></div>
           <div><dt>Last read</dt><dd>{timeAgo(progress?.lastReadAt)}</dd></div>
           <div><dt>Time spent</dt><dd>{formatDuration(readMs)} over {sessions.length} session{sessions.length === 1 ? '' : 's'}</dd></div>
-          <div><dt>Storage</dt><dd>{comic.hasFile ? 'On this device' : 'Not on this device'}{comic.driveFileId ? ' · In Google Drive' : ''}</dd></div>
+          <div>
+            <dt>Storage</dt>
+            <dd>
+              {comic.hasFile ? 'Downloaded on this device' : comic.driveFileId ? 'Streams from Google Drive' : 'Not on this device'}
+              {comic.driveFolderId ? ' · from your linked Drive folder' : comic.driveFileId ? ' · in Google Drive' : ''}
+            </dd>
+          </div>
           <div><dt>File</dt><dd className="ellipsis">{comic.fileName}</dd></div>
         </dl>
 

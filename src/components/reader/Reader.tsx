@@ -14,7 +14,9 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from 'react';
 import { db, type Comic, type Direction, type ReadMode } from '../../db';
-import { openComic, type ComicSource } from '../../lib/archive';
+import type { ComicSource } from '../../lib/archive';
+import { applySourceInfo } from '../../lib/importer';
+import { openForReading } from '../../lib/remote';
 import { useElementSize } from '../../lib/hooks';
 import { nextInSeries, saveProgress, startSession, toggleBookmark, updateComic } from '../../lib/library';
 import { contentBox, detectPanels, type Rect } from '../../lib/panels';
@@ -45,6 +47,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
 
   const [source, setSource] = useState<ComicSource | null>(null);
   const [error, setError] = useState<string>();
+  const [loading, setLoading] = useState<{ streaming: boolean; progress?: number }>({ streaming: false });
   const [page, setPage] = useState<number | null>(null); // anchor page (first page of the current view)
   const [ui, setUi] = useState(false);
   const [panel, setPanel] = useState<'none' | 'settings' | 'pages'>('none');
@@ -75,11 +78,14 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
     let src: ComicSource | null = null;
     let cancelled = false;
     (async () => {
-      const [c, file] = await Promise.all([db.comics.get(comicId), db.files.get(comicId)]);
-      if (!c || !file) throw new Error('This comic is not downloaded on this device.');
-      src = await openComic(file.blob, c.fileName);
+      const c = await db.comics.get(comicId);
+      if (!c) throw new Error('Comic not found.');
+      if (!c.hasFile) setLoading({ streaming: true, progress: undefined });
+      src = await openForReading(c, (progress) => setLoading({ streaming: true, progress }));
       if (cancelled) return src.close();
-      if (src.pageCount !== c.pageCount) await db.comics.update(c.id, { pageCount: src.pageCount });
+      if (src.pageCount === 0) throw new Error('No pages found in this file.');
+      // page count, ComicInfo and covers for comics only known from Drive so far
+      void applySourceInfo(c.id, src);
       const p = await db.progress.get(comicId);
       const start = p && !p.finished ? Math.min(p.page, src.pageCount - 1) : 0;
       setSource(src);
@@ -135,7 +141,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
   useEffect(() => {
     if (!comic || page === null) return;
     session.current?.page(lastVisible);
-    const t = setTimeout(() => void saveProgress(comic, lastVisible), 400);
+    const t = setTimeout(() => void saveProgress({ ...comic, pageCount: source?.pageCount || comic.pageCount }, lastVisible), 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastVisible, comic?.id]);
@@ -177,7 +183,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
       if (target >= views.length) {
         setAtEnd(true);
         setUi(false);
-        if (comic) void saveProgress(comic, comic.pageCount - 1);
+        if (comic && source) void saveProgress({ ...comic, pageCount: source.pageCount }, source.pageCount - 1);
         return;
       }
       if (target < 0) return;
@@ -196,7 +202,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
       setDrag(0);
       setPage(views[target][0]);
     },
-    [views, vi, view, mode, prefs.transition, comic],
+    [views, vi, view, mode, prefs.transition, comic, source],
   );
 
   const next = useCallback(() => {
@@ -438,7 +444,18 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
         <button className="btn" onClick={onClose}>Back to library</button>
       </div>
     );
-  if (!comic || !source || page === null) return <div className="reader"><div className="spinner" /></div>;
+  if (!comic || !source || page === null)
+    return (
+      <div className="reader reader-loading">
+        <div className="spinner" />
+        {loading.streaming && (
+          <p>
+            {loading.progress === undefined ? 'Opening from Google Drive…' : `Loading from Google Drive… ${Math.round(loading.progress * 100)}%`}
+          </p>
+        )}
+        <button className="btn ghost small" onClick={onClose}>Cancel</button>
+      </div>
+    );
 
   const bookmarked = progress?.bookmarks.includes(lastVisible);
   const crop = (p: number) => (prefs.autoCrop && mode !== 'guided' ? crops.get(p) : null);

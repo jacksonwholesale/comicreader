@@ -5,9 +5,12 @@ import { getKV } from '../db';
  * Google Drive access via Google Identity Services (browser-only OAuth, no backend).
  * Scopes:
  *  - drive.appdata: hidden per-app folder holding the sync file (progress, collections, sessions)
- *  - drive.file: only files this app creates, i.e. comics you upload; it cannot see the rest of your Drive
+ *  - drive.file: files this app creates (comics you upload from the app)
+ *  - drive.readonly: read access so folders you link can be listed and streamed. The app
+ *    never edits or deletes anything outside its own files.
  */
-const SCOPES = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file';
+const READONLY = 'https://www.googleapis.com/auth/drive.readonly';
+const SCOPES = `https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file ${READONLY}`;
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 
@@ -87,6 +90,7 @@ export function requestToken(interactive: boolean): Promise<string> {
           if (resp.error) return reject(new Error(resp.error_description || resp.error));
           const token = { access: resp.access_token, expires: Date.now() + Number(resp.expires_in) * 1000 };
           localStorage.setItem('drive.token', JSON.stringify(token));
+          localStorage.setItem('drive.scopes', String(resp.scope ?? ''));
           localStorage.setItem('drive.connected', '1');
           resolve(token.access);
         },
@@ -98,6 +102,15 @@ export function requestToken(interactive: boolean): Promise<string> {
     pending = null;
   });
   return pending;
+}
+
+/** True once the user has granted read access for linked folders (added after first release). */
+export function hasFolderAccess() {
+  try {
+    return (localStorage.getItem('drive.scopes') ?? '').includes(READONLY);
+  } catch {
+    return false;
+  }
 }
 
 /** The Google account Drive sync is connected to on this device. */
@@ -115,6 +128,7 @@ export function disconnect() {
   localStorage.removeItem('drive.token');
   localStorage.removeItem('drive.connected');
   localStorage.removeItem('drive.email');
+  localStorage.removeItem('drive.scopes');
 }
 
 export class NeedsSignIn extends Error {
@@ -251,4 +265,54 @@ export async function downloadComic(fileId: string, onProgress?: (fraction: numb
 
 export async function deleteDriveFile(fileId: string) {
   await api(`${API}/files/${fileId}`, { method: 'DELETE' }).catch(() => {});
+}
+
+// ---- linked folders: listing and byte-range streaming ----
+
+export interface DriveItem {
+  id: string;
+  name: string;
+  mimeType: string;
+  size?: number;
+  modifiedTime?: string;
+  parents?: string[];
+}
+
+export const FOLDER_MIME = 'application/vnd.google-apps.folder';
+
+/** Children of a folder ('root' = My Drive). Folders and files, all pages. */
+export async function listChildren(folderId: string, foldersOnly = false): Promise<DriveItem[]> {
+  const out: DriveItem[] = [];
+  let pageToken = '';
+  const q = encodeURIComponent(`'${folderId}' in parents and trashed=false${foldersOnly ? ` and mimeType='${FOLDER_MIME}'` : ''}`);
+  do {
+    const res = await api(
+      `${API}/files?q=${q}&pageSize=1000&orderBy=folder,name_natural&fields=nextPageToken,files(id,name,mimeType,size,modifiedTime)&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? `&pageToken=${pageToken}` : ''}`,
+    );
+    const json = await res.json();
+    out.push(...json.files.map((f: any) => ({ ...f, size: f.size ? Number(f.size) : undefined })));
+    pageToken = json.nextPageToken ?? '';
+  } while (pageToken);
+  return out;
+}
+
+export async function getItem(id: string): Promise<DriveItem> {
+  const res = await api(`${API}/files/${id}?fields=id,name,mimeType,size,modifiedTime,parents&supportsAllDrives=true`);
+  const f = await res.json();
+  return { ...f, size: f.size ? Number(f.size) : undefined };
+}
+
+/** Bytes [start, end] (inclusive) of a Drive file, without downloading the rest. */
+export async function fetchRange(fileId: string, start: number, end: number): Promise<Uint8Array> {
+  const res = await api(`${API}/files/${fileId}?alt=media&supportsAllDrives=true`, { headers: { Range: `bytes=${start}-${end}` } });
+  const buf = new Uint8Array(await res.arrayBuffer());
+  // A server that ignores Range sends the whole file; slice so callers always get what they asked for.
+  return res.status === 206 ? buf : buf.subarray(start, end + 1);
+}
+
+/** Folders other people shared with you (top level of "Shared with me"). */
+export async function listSharedFolders(): Promise<DriveItem[]> {
+  const q = encodeURIComponent(`sharedWithMe and mimeType='${FOLDER_MIME}' and trashed=false`);
+  const res = await api(`${API}/files?q=${q}&pageSize=200&orderBy=name_natural&fields=files(id,name,mimeType)`);
+  return (await res.json()).files ?? [];
 }

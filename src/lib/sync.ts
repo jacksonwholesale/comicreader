@@ -2,7 +2,8 @@ import { db, getKV, setKV, type Collection, type Comic, type Progress, type Read
 import * as drive from './drive';
 import { clearDirty, isDirty, markDirty, onDirty } from './syncState';
 import { getPrefs, getPrefsUpdatedAt, setPrefs, type Prefs } from './prefs';
-import { collectionMembers } from './library';
+import { collectionMembers, removeDownload } from './library';
+import { getLinkedFolders, scanLinkedFolders, setLinkedFolders } from './driveLibrary';
 
 /**
  * Everything except the comic files themselves lives in one JSON file in Drive's hidden
@@ -18,6 +19,7 @@ interface SyncDoc {
   collections: Record<string, Collection>;
   sessions: ReadingSession[];
   prefs?: { value: Prefs; updatedAt: number };
+  folders?: Awaited<ReturnType<typeof getLinkedFolders>>;
 }
 
 export type SyncStatus =
@@ -69,6 +71,7 @@ async function buildDoc(): Promise<SyncDoc> {
     collections: Object.fromEntries(collections.map((c) => [c.id, c])),
     sessions,
     prefs: { value: getPrefs(), updatedAt: prefsUpdatedAt },
+    folders: await getLinkedFolders(),
   };
 }
 
@@ -102,6 +105,10 @@ async function mergeRemote(remote: SyncDoc): Promise<boolean> {
       changed = true;
     }
   });
+  if (remote.folders && remote.folders.updatedAt > (await getLinkedFolders()).updatedAt) {
+    await setLinkedFolders(remote.folders);
+    changed = true;
+  }
   if (remote.prefs && remote.prefs.updatedAt > getPrefsUpdatedAt()) {
     setPrefs(remote.prefs.value, remote.prefs.updatedAt);
     changed = true;
@@ -130,6 +137,7 @@ export function syncNow(): Promise<void> {
       await setKV('sync.last', now);
       setStatus({ state: 'idle', lastSync: now });
       void processDriveQueue();
+      void scanLinkedFolders();
     } catch (e) {
       const needsSignIn = e instanceof drive.NeedsSignIn;
       setStatus({ state: 'error', message: (e as Error).message, needsSignIn, lastSync: await getKV<number>('sync.last', 0) });
@@ -193,13 +201,34 @@ export async function downloadFromDrive(comicId: string) {
     const blob = await drive.downloadComic(comic.driveFileId, (p) =>
       setTransfer({ id: comicId, title: comic.title, kind: 'download', progress: p }),
     );
-    const { importFile } = await import('./importer');
-    await importFile(blob, comic.fileName, { driveFileId: comic.driveFileId });
+    const { attachFile } = await import('./importer');
+    await attachFile(comic.id, blob);
     setTransfer({ id: comicId, remove: true });
   } catch (e) {
     setTransfer({ id: comicId, title: comic.title, kind: 'download', progress: 0, error: (e as Error).message });
     throw e;
   }
+}
+
+/** Download several comics for offline reading, one at a time. */
+export async function downloadMany(ids: string[]) {
+  for (const id of ids) {
+    const c = await db.comics.get(id);
+    if (c && !c.hasFile && c.driveFileId && !c.deleted) await downloadFromDrive(id).catch(() => {});
+  }
+}
+
+/** Free space on this device for comics that are safely in Drive. Returns how many were removed. */
+export async function removeDownloads(ids: string[]) {
+  let n = 0;
+  for (const id of ids) {
+    const c = await db.comics.get(id);
+    if (c?.hasFile && c.driveFileId) {
+      await removeDownload(id);
+      n++;
+    }
+  }
+  return n;
 }
 
 export function dismissTransfer(id: string) {

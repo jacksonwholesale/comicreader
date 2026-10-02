@@ -1,4 +1,4 @@
-import { CheckCheck, ChevronLeft, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { CheckCheck, ChevronLeft, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import type { Comic } from '../db';
 import { ACCEPT, IMAGE_ACCEPT } from '../lib/archive';
@@ -6,10 +6,11 @@ import { collectFromDirectory, fromFileList } from '../lib/importer';
 import { queueImport } from '../lib/importQueue';
 import { deleteComics, setFinished, sortComics, statusOf, type SortKey } from '../lib/library';
 import { useLibrary } from '../lib/useLibrary';
+import { downloadMany, removeDownloads } from '../lib/sync';
 import { ComicCard, Cover } from '../components/ComicCard';
 import { AddToCollection } from '../components/AddToCollection';
 
-type Filter = 'all' | 'unread' | 'reading' | 'finished' | 'favorites' | 'cloud';
+type Filter = 'all' | 'unread' | 'reading' | 'finished' | 'favorites' | 'downloaded' | 'cloud';
 
 interface Props {
   onDetail: (c: Comic) => void;
@@ -23,7 +24,8 @@ const FILTERS: [Filter, string][] = [
   ['reading', 'Reading'],
   ['finished', 'Finished'],
   ['favorites', 'Favorites'],
-  ['cloud', 'Not downloaded'],
+  ['downloaded', 'Downloaded'],
+  ['cloud', 'In Drive only'],
 ];
 
 export function Library({ onDetail, onRead, notify }: Props) {
@@ -54,6 +56,8 @@ export function Library({ onDetail, onRead, notify }: Props) {
           return st === filter;
         case 'favorites':
           return !!c.favorite;
+        case 'downloaded':
+          return !!c.hasFile;
         case 'cloud':
           return !c.hasFile;
       }
@@ -107,7 +111,8 @@ export function Library({ onDetail, onRead, notify }: Props) {
     } else folderInput.current?.click();
   };
 
-  const open = (c: Comic) => (c.hasFile ? onRead(c.id) : onDetail(c));
+  // Downloaded comics open from the device; others stream from Drive.
+  const open = (c: Comic) => (c.hasFile || c.driveFileId ? onRead(c.id) : onDetail(c));
 
   if (loading) return <div className="center-fill"><div className="spinner" /></div>;
 
@@ -220,6 +225,16 @@ export function Library({ onDetail, onRead, notify }: Props) {
           <span><strong>{selected.size}</strong> selected</span>
           <button className="btn small ghost" onClick={() => setSelected(new Set(visible.map((c) => c.id)))}>All</button>
           <button className="btn small" onClick={() => setAdding(true)}><FolderPlus size={16} /> <span className="hide-mobile">Collection</span></button>
+          <button className="btn small" title="Download for offline reading" onClick={() => { void downloadMany([...selected]); notify('Downloading for offline reading…'); endSelect(); }}>
+            <CloudDownload size={16} /> <span className="hide-mobile">Download</span>
+          </button>
+          <button
+            className="btn small"
+            title="Remove downloads (stay in Drive)"
+            onClick={() => void removeDownloads([...selected]).then((n) => { notify(n ? `Freed space from ${n} comic(s) — still in Drive` : 'Nothing to remove: only comics stored in Drive can be removed from the device'); endSelect(); })}
+          >
+            <HardDriveDownload size={16} /> <span className="hide-mobile">Remove</span>
+          </button>
           <button className="btn small" onClick={() => void setFinished([...selected], true).then(endSelect)}><CheckCheck size={16} /> <span className="hide-mobile">Read</span></button>
           <button className="btn small" onClick={() => void setFinished([...selected], false).then(endSelect)}><RotateCcw size={16} /> <span className="hide-mobile">Unread</span></button>
           <button

@@ -69,7 +69,7 @@ export async function openComic(blob: Blob, fileName: string): Promise<ComicSour
   throw new Error(`Unsupported file: ${fileName}`);
 }
 
-function urlCache(load: (i: number) => Promise<Blob>, pageCount: number) {
+export function urlCache(load: (i: number) => Promise<Blob>, pageCount: number) {
   const cache = new Map<number, Promise<string>>();
   return {
     pageUrl(i: number) {
@@ -89,38 +89,61 @@ function urlCache(load: (i: number) => Promise<Blob>, pageCount: number) {
   };
 }
 
-function mimeFor(name: string) {
+export function mimeFor(name: string) {
   const ext = name.toLowerCase().split('.').pop();
   return ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : ext === 'avif' ? 'image/avif' : 'image/jpeg';
 }
 
+/** Anything that can list entries and read one by name: an in-memory zip, or a zip streamed from Drive. */
+export interface ArchiveReader {
+  names: string[];
+  read(name: string): Promise<Uint8Array>;
+  close?(): void;
+}
+
 async function openZip(blob: Blob): Promise<ComicSource> {
   const zip = await JSZip.loadAsync(blob);
-  const isEpub = (await zip.file('mimetype')?.async('string'))?.trim() === 'application/epub+zip';
+  return sourceFromArchive({
+    names: Object.keys(zip.files).filter((n) => !zip.files[n].dir),
+    read: (n) => zip.files[n].async('uint8array'),
+  });
+}
+
+/** CBZ or EPUB pages from a zip-like archive, reading only the entries actually needed. */
+export async function sourceFromArchive(ar: ArchiveReader): Promise<ComicSource> {
+  const has = new Set(ar.names);
+  const text = async (n: string) => (has.has(n) ? new TextDecoder().decode(await ar.read(n)) : undefined);
+  const isEpub = has.has('mimetype') && (await text('mimetype'))?.trim() === 'application/epub+zip';
   let names: string[] = [];
   let comicInfoXml: string | undefined;
   if (isEpub) {
-    const epub = await epubPages(zip);
+    const epub = await epubPages({ has: (n) => has.has(n), text });
     names = epub.pages;
     comicInfoXml = epub.comicInfoXml;
   }
-  if (!names.length) names = sortPages(Object.keys(zip.files).filter((n) => !zip.files[n].dir));
+  if (!names.length) names = sortPages(ar.names);
   if (!comicInfoXml) {
-    const infoEntry = Object.keys(zip.files).find((n) => /(^|\/)comicinfo\.xml$/i.test(n));
-    comicInfoXml = infoEntry ? await zip.files[infoEntry].async('string') : undefined;
+    const infoEntry = ar.names.find((n) => /(^|\/)comicinfo\.xml$/i.test(n));
+    comicInfoXml = infoEntry ? await text(infoEntry) : undefined;
   }
-  const c = urlCache(
-    async (i) => new Blob([await zip.files[names[i]].async('arraybuffer')], { type: mimeFor(names[i]) }),
-    names.length,
-  );
-  return { format: isEpub ? 'epub' : 'cbz', pageCount: names.length, pageUrl: c.pageUrl, comicInfoXml, close: c.release };
+  const c = urlCache(async (i) => new Blob([(await ar.read(names[i])) as BlobPart], { type: mimeFor(names[i]) }), names.length);
+  return {
+    format: isEpub ? 'epub' : 'cbz',
+    pageCount: names.length,
+    pageUrl: c.pageUrl,
+    comicInfoXml,
+    close() {
+      c.release();
+      ar.close?.();
+    },
+  };
 }
 
 /**
  * Image-based (fixed-layout) EPUB comics/manga: walk the spine in order and take the
  * image each page shows. Also turns the OPF's Dublin Core data into ComicInfo-style XML.
  */
-async function epubPages(zip: JSZip): Promise<{ pages: string[]; comicInfoXml?: string }> {
+async function epubPages(zip: { has(n: string): boolean; text(n: string): Promise<string | undefined> }): Promise<{ pages: string[]; comicInfoXml?: string }> {
   const parse = (s: string) => new DOMParser().parseFromString(s, 'application/xml');
   const resolve = (base: string, href: string) => {
     const parts = (base.replace(/[^/]*$/, '') + decodeURIComponent(href.split('#')[0])).split('/');
@@ -128,9 +151,9 @@ async function epubPages(zip: JSZip): Promise<{ pages: string[]; comicInfoXml?: 
     for (const p of parts) p === '..' ? out.pop() : p && p !== '.' && out.push(p);
     return out.join('/');
   };
-  const container = await zip.file('META-INF/container.xml')?.async('string');
+  const container = await zip.text('META-INF/container.xml');
   const opfPath = container && parse(container).querySelector('rootfile')?.getAttribute('full-path');
-  const opfText = opfPath && (await zip.file(opfPath)?.async('string'));
+  const opfText = opfPath && (await zip.text(opfPath));
   if (!opfPath || !opfText) return { pages: [] };
   const opf = parse(opfText);
   const manifest = new Map<string, { href: string; type: string }>();
@@ -145,12 +168,12 @@ async function epubPages(zip: JSZip): Promise<{ pages: string[]; comicInfoXml?: 
       pages.push(item.href);
       continue;
     }
-    const html = await zip.file(item.href)?.async('string');
+    const html = await zip.text(item.href);
     if (!html) continue;
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const el = doc.querySelector('img[src], image[href], image[*|href]');
     const src = el?.getAttribute('src') ?? el?.getAttribute('href') ?? el?.getAttribute('xlink:href');
-    if (src && zip.file(resolve(item.href, src))) pages.push(resolve(item.href, src));
+    if (src && zip.has(resolve(item.href, src))) pages.push(resolve(item.href, src));
   }
   const dc = (tag: string) => opf.getElementsByTagNameNS('http://purl.org/dc/elements/1.1/', tag)[0]?.textContent?.trim();
   const esc = (s?: string) => (s ?? '').replace(/[<&>]/g, (ch) => `&#${ch.charCodeAt(0)};`);
@@ -274,10 +297,18 @@ async function openRar(blob: Blob): Promise<ComicSource> {
 }
 
 async function openPdf(blob: Blob): Promise<ComicSource> {
+  const data = new Uint8Array(await blob.arrayBuffer());
+  return openPdfWith(() => ({ data }));
+}
+
+type PdfJs = typeof import('pdfjs-dist');
+
+/** Opens a PDF from whatever getDocument() params the caller builds (in-memory bytes, or a range transport). */
+export async function openPdfWith(params: (pdfjs: PdfJs) => object): Promise<ComicSource> {
   const pdfjs = await import('pdfjs-dist');
   const { default: workerUrl } = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-  const task = pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) });
+  const task = pdfjs.getDocument(params(pdfjs));
   const doc = await task.promise;
   const target = Math.min(2400, Math.max(1400, Math.round(screen.height * devicePixelRatio)));
   const c = urlCache(async (i) => {

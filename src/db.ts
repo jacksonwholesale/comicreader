@@ -29,6 +29,9 @@ export interface Comic {
   readMode?: ReadMode; // per-comic override
   direction?: Direction; // per-comic override
   favorite?: 0 | 1;
+  driveFolderId?: string; // set for comics that come from a linked Drive folder
+  driveModified?: string; // Drive modifiedTime, to notice replaced files
+  infoRead?: 0 | 1; // ComicInfo/EPUB metadata already applied
   deleted?: 0 | 1; // tombstone for sync
 }
 

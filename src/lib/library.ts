@@ -88,7 +88,8 @@ export async function deleteComics(ids: string[]) {
     for (const id of ids) {
       const c = await db.comics.get(id);
       if (!c) continue;
-      if (c.driveFileId) driveIds.push(c.driveFileId);
+      // Only delete Drive copies the app uploaded; files in your linked folders are never touched.
+      if (c.driveFileId && !c.driveFolderId) driveIds.push(c.driveFileId);
       await db.files.delete(id);
       await db.comics.put({ ...c, cover: undefined, coverTiny: undefined, hasFile: 0, driveFileId: undefined, deleted: 1, updatedAt: now });
     }

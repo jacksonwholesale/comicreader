@@ -1,10 +1,10 @@
-import { ArrowDown, ArrowUp, BookOpen, ChevronLeft, Cloud, CloudOff, FolderPlus, Sparkles, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, BookOpen, ChevronLeft, Cloud, CloudDownload, CloudOff, HardDriveDownload, FolderPlus, Sparkles, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { Collection, Comic, SmartRule } from '../db';
 import { isConnected } from '../lib/drive';
 import { go } from '../lib/hooks';
 import { collectionMembers, createCollection, deleteCollection, removeFromCollection, statusOf, updateCollection } from '../lib/library';
-import { processDriveQueue } from '../lib/sync';
+import { downloadMany, processDriveQueue, removeDownloads } from '../lib/sync';
 import { useLibrary } from '../lib/useLibrary';
 import { ComicCard, Cover } from '../components/ComicCard';
 import { Toggle } from '../components/reader/ReaderSettings';
@@ -107,10 +107,20 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
           {members.length > 0 && <div className="progress-bar inline"><i style={{ width: `${(read / members.length) * 100}%` }} /></div>}
         </div>
         <div className="row gap wrap">
-          {nextUp && nextUp.hasFile && (
+          {nextUp && (nextUp.hasFile || nextUp.driveFileId) && (
             <button className="btn primary" onClick={() => onRead(nextUp.id)}><BookOpen size={18} /> {statusOf(progress.get(nextUp.id)) === 'reading' ? 'Continue' : 'Start'}: {nextUp.title}</button>
           )}
           {col.smart && <button className="btn" onClick={() => setEditRules((v) => !v)}><Sparkles size={18} /> Rules</button>}
+          {members.some((c) => !c.hasFile && c.driveFileId) && (
+            <button className="btn" onClick={() => void downloadMany(members.map((c) => c.id))}>
+              <CloudDownload size={18} /> Download all ({members.filter((c) => !c.hasFile && c.driveFileId).length})
+            </button>
+          )}
+          {members.some((c) => c.hasFile && c.driveFileId) && (
+            <button className="btn ghost" onClick={() => void removeDownloads(members.map((c) => c.id))}>
+              <HardDriveDownload size={18} /> Remove downloads
+            </button>
+          )}
         </div>
         <div className="drive-toggle">
           <Toggle
@@ -138,7 +148,7 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
       {col.smart ? (
         <div className="grid">
           {members.map((c) => (
-            <ComicCard key={c.id} comic={c} progress={progress.get(c.id)} onOpen={() => (c.hasFile ? onRead(c.id) : onDetail(c))} onSelect={() => onDetail(c)} />
+            <ComicCard key={c.id} comic={c} progress={progress.get(c.id)} onOpen={() => (c.hasFile || c.driveFileId ? onRead(c.id) : onDetail(c))} onSelect={() => onDetail(c)} />
           ))}
         </div>
       ) : (
@@ -148,13 +158,13 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
             return (
               <li key={c.id} className={st}>
                 <span className="rl-num">{i + 1}</span>
-                <button className="rl-main" onClick={() => (c.hasFile ? onRead(c.id) : onDetail(c))}>
+                <button className="rl-main" onClick={() => (c.hasFile || c.driveFileId ? onRead(c.id) : onDetail(c))}>
                   <Cover comic={c} className="rl-cover" />
                   <span className="rl-text">
                     <strong>{c.title}</strong>
                     <span className="muted small">
                       {c.series}{c.number ? ` #${c.number}` : ''} · {st === 'finished' ? 'Read' : st === 'reading' ? 'In progress' : 'Unread'}
-                      {!c.hasFile ? ' · in Drive' : ''}
+                      {!c.hasFile ? ' · streams from Drive' : ''}
                     </span>
                   </span>
                 </button>

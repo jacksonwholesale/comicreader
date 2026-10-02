@@ -1,5 +1,5 @@
 import { db, type Comic } from '../db';
-import { detectFormat, imagesToCbz, isImageName, openComic, parseComicInfo, parseFileName } from './archive';
+import { detectFormat, imagesToCbz, isImageName, openComic, parseComicInfo, parseFileName, type ComicSource } from './archive';
 import { markDirty } from './syncState';
 
 /**
@@ -36,6 +36,60 @@ async function thumb(url: string, width: number, quality: number, asDataUrl = fa
   return new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('thumb failed'))), 'image/webp', quality));
 }
 
+// Small cover that travels inside the sync file, so devices without the comic still show it.
+const TINY_COVER = 160;
+
+export async function makeCovers(src: ComicSource) {
+  const url = await src.pageUrl(0);
+  const [cover, coverTiny] = await Promise.all([thumb(url, 360, 0.82), thumb(url, TINY_COVER, 0.62, true)]);
+  return { cover, coverTiny };
+}
+
+/**
+ * Fill in what we learn by opening a comic that was only known from Drive: page count,
+ * ComicInfo metadata (without overwriting your edits) and covers.
+ */
+export async function applySourceInfo(comicId: string, src: ComicSource) {
+  const comic = await db.comics.get(comicId);
+  if (!comic) return;
+  const patch: Partial<Comic> = {};
+  if (comic.pageCount !== src.pageCount) patch.pageCount = src.pageCount;
+  if (!comic.cover) {
+    const covers = await makeCovers(src).catch(() => null);
+    if (covers) {
+      patch.cover = covers.cover;
+      if (!comic.coverTiny) patch.coverTiny = covers.coverTiny;
+    }
+  }
+  if (!comic.infoRead) {
+    const info = stripEmpty(parseComicInfo(src.comicInfoXml));
+    for (const k of ['title', 'series', 'number', 'volume', 'year', 'publisher', 'writer', 'artist', 'summary'] as const) {
+      if (info[k] !== undefined) (patch as any)[k] = info[k];
+    }
+    if (info.manga) patch.mangaHint = 1;
+    patch.infoRead = 1;
+  }
+  if (!Object.keys(patch).length) return;
+  // covers are device-local; only synced fields bump updatedAt
+  const synced = Object.keys(patch).some((k) => k !== 'cover');
+  await db.comics.update(comicId, synced ? { ...patch, updatedAt: Date.now() } : patch);
+  if (synced) markDirty();
+}
+
+/** Store a downloaded file for a comic already in the library (e.g. from Drive), keeping its id. */
+export async function attachFile(comicId: string, blob: Blob) {
+  const comic = await db.comics.get(comicId);
+  if (!comic) throw new Error('Comic not found');
+  const src = await openComic(blob, comic.fileName);
+  try {
+    await db.files.put({ id: comicId, blob });
+    await db.comics.update(comicId, { hasFile: 1, size: blob.size });
+    await applySourceInfo(comicId, src);
+  } finally {
+    src.close();
+  }
+}
+
 export interface ImportResult {
   added: number;
   skipped: number;
@@ -56,7 +110,7 @@ export async function importFile(file: Blob, fileName: string, extra: Partial<Co
   try {
     if (src.pageCount === 0) throw new Error('No pages found');
     const coverUrl = await src.pageUrl(0);
-    const [cover, coverTiny] = await Promise.all([thumb(coverUrl, 360, 0.82), thumb(coverUrl, 120, 0.6, true)]);
+    const [cover, coverTiny] = await Promise.all([thumb(coverUrl, 360, 0.82), thumb(coverUrl, TINY_COVER, 0.62, true)]);
     const info = { ...parseFileName(fileName), ...stripEmpty(parseComicInfo(src.comicInfoXml)) };
     const now = Date.now();
     const comic: Comic = {
@@ -73,6 +127,7 @@ export async function importFile(file: Blob, fileName: string, extra: Partial<Co
       artist: info.artist,
       summary: info.summary,
       mangaHint: info.manga ? 1 : 0,
+      infoRead: 1,
       addedAt: now,
       // keep user-edited fields/overrides from a synced record that lacked the file
       ...existing,
