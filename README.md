@@ -46,13 +46,13 @@ Open http://localhost:5173. `npm run build` writes the installable app to `dist/
 
 Sync runs entirely in the browser with Google sign-in. There's no server, so you need your own free OAuth Client ID:
 
-1. Go to https://console.cloud.google.com/ and create a project (any name).
+1. **Sign in with the Google account whose Drive you want to use** (e.g. your personal Gmail), then go to https://console.cloud.google.com/ and create a project (any name). If you're signed into several accounts, check the avatar in the top-right corner. A work (Google Workspace) account's admin can block this kind of app, which is another reason to use a personal account.
 2. **APIs & Services → Library**: enable the **Google Drive API**.
-3. **APIs & Services → OAuth consent screen** (also labelled "Google Auth Platform"): choose **External**, fill in the app name and your email, and add yourself under **Test users**. While the app is in "Testing", only the test users you list can sign in, which is all you need.
+3. **APIs & Services → OAuth consent screen** (also labelled "Google Auth Platform"): choose **External**, fill in the app name and your email, and add the Gmail address you'll sync with under **Test users**. While the app is in "Testing", only the test users you list can sign in, which is all you need.
 4. **Credentials → Create credentials → OAuth client ID → Web application**. Under **Authorized JavaScript origins**, add every address you'll open the app from, for example:
    - `http://localhost:5173` (development)
    - your hosted address, e.g. `https://yourname.github.io`
-5. Copy the Client ID (`…apps.googleusercontent.com`) and paste it into **Settings → Google Drive sync** on each device, then tap **Connect**. You can also put it in `.env.local` as `VITE_GOOGLE_CLIENT_ID=…` so it's built in.
+5. Copy the Client ID (`…apps.googleusercontent.com`) and paste it into **Settings → Google Drive sync** on each device, then tap **Connect**. Google will ask which account to use: pick the same personal account on every device. Settings then shows "Connected as …", and **Switch Google account** lets you change it later. You can also put it in `.env.local` as `VITE_GOOGLE_CLIENT_ID=…` so it's built in.
 
 Google tokens last about an hour. The app renews them quietly when it can; if your browser blocks that, Settings shows a **Reconnect** button.
 

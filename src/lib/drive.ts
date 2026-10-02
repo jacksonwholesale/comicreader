@@ -78,7 +78,11 @@ export function requestToken(interactive: boolean): Promise<string> {
       const client = window.google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: SCOPES,
-        prompt: interactive ? 'consent' : '',
+        // Always show the account chooser when connecting, so a browser signed into several
+        // Google accounts never silently picks the wrong one. Background renewals are pinned
+        // to the account chosen then.
+        prompt: interactive ? 'select_account consent' : '',
+        login_hint: interactive ? undefined : connectedEmail(),
         callback: (resp: any) => {
           if (resp.error) return reject(new Error(resp.error_description || resp.error));
           const token = { access: resp.access_token, expires: Date.now() + Number(resp.expires_in) * 1000 };
@@ -96,11 +100,21 @@ export function requestToken(interactive: boolean): Promise<string> {
   return pending;
 }
 
+/** The Google account Drive sync is connected to on this device. */
+export function connectedEmail(): string | undefined {
+  try {
+    return localStorage.getItem('drive.email') || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function disconnect() {
   const t = readToken();
   if (t && window.google?.accounts?.oauth2) window.google.accounts.oauth2.revoke(t.access, () => {});
   localStorage.removeItem('drive.token');
   localStorage.removeItem('drive.connected');
+  localStorage.removeItem('drive.email');
 }
 
 export class NeedsSignIn extends Error {
@@ -132,7 +146,9 @@ async function api(url: string, init: RequestInit = {}, retry = true): Promise<R
 
 export async function getAccountEmail(): Promise<string | undefined> {
   const res = await api(`${API}/about?fields=user(emailAddress)`);
-  return (await res.json()).user?.emailAddress;
+  const email: string | undefined = (await res.json()).user?.emailAddress;
+  if (email) localStorage.setItem('drive.email', email);
+  return email;
 }
 
 // ---- sync file (appDataFolder) ----

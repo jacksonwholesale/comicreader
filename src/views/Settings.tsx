@@ -3,7 +3,7 @@ import { Cloud, CloudOff, Download, RefreshCw, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { APP } from '../config';
 import { db, getKV, setKV } from '../db';
-import { getAccountEmail, getClientId, isConnected } from '../lib/drive';
+import { connectedEmail, getAccountEmail, getClientId, isConnected } from '../lib/drive';
 import { formatBytes, timeAgo } from '../lib/library';
 import { setPrefs, usePrefs } from '../lib/prefs';
 import { connectDrive, disconnectDrive, syncNow } from '../lib/sync';
@@ -15,7 +15,7 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
   const prefs = usePrefs();
   const status = useSyncStatus();
   const [clientId, setClientId] = useState('');
-  const [email, setEmail] = useState<string>();
+  const [email, setEmail] = useState<string | undefined>(connectedEmail);
   const [deviceName, setDeviceName] = useState(device.name);
   const [storage, setStorage] = useState<{ usage?: number; quota?: number }>({});
   const counts = useLiveQuery(async () => ({ comics: await db.comics.filter((c) => !c.deleted).count(), local: await db.comics.where('hasFile').equals(1).count() }), [], { comics: 0, local: 0 });
@@ -51,13 +51,22 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
                 onBlur={() => void setKV('googleClientId', clientId)}
               />
             </label>
-            <p className="muted small">One-time setup — see “Google Drive sync setup” in the README. Use the same Client ID on every device.</p>
+            <p className="muted small">
+              One-time setup — see “Google Drive sync setup” in the README. Use the same Client ID on every device. When you connect, Google asks which
+              account to use — pick the same one on your phone and computer.
+            </p>
             <button
               className="btn primary"
               disabled={!clientId}
               onClick={async () => {
                 await setKV('googleClientId', clientId);
-                connectDrive().then(() => notify('Connected to Google Drive'), (e) => notify((e as Error).message));
+                connectDrive().then(
+                  () => {
+                    setEmail(connectedEmail());
+                    notify(`Connected as ${connectedEmail() ?? 'your Google account'}`);
+                  },
+                  (e) => notify((e as Error).message),
+                );
               }}
             >
               <Cloud size={18} /> Connect Google Drive
@@ -68,7 +77,7 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
             <div className="sync-status">
               <span className={`status-dot ${status.state}`} />
               <div className="grow">
-                <strong>{email ?? 'Connected'}</strong>
+                <strong>{email ? `Connected as ${email}` : 'Connected'}</strong>
                 <span className="muted small">
                   {status.state === 'syncing'
                     ? 'Syncing…'
@@ -83,9 +92,27 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
                 <button className="btn small" disabled={status.state === 'syncing'} onClick={() => void syncNow()}><RefreshCw size={16} /> Sync now</button>
               )}
             </div>
-            <button className="btn ghost small" onClick={() => confirm('Disconnect Google Drive on this device? Nothing is deleted.') && disconnectDrive()}>
-              <CloudOff size={16} /> Disconnect
-            </button>
+            <div className="row gap wrap">
+              <button
+                className="btn small"
+                onClick={() => {
+                  disconnectDrive();
+                  setEmail(undefined);
+                  connectDrive().then(
+                    () => {
+                      setEmail(connectedEmail());
+                      notify(`Connected as ${connectedEmail() ?? 'new account'}`);
+                    },
+                    (e) => notify((e as Error).message),
+                  );
+                }}
+              >
+                Switch Google account
+              </button>
+              <button className="btn ghost small" onClick={() => confirm('Disconnect Google Drive on this device? Nothing is deleted.') && disconnectDrive()}>
+                <CloudOff size={16} /> Disconnect
+              </button>
+            </div>
           </>
         )}
         <label className="field">

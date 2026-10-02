@@ -228,6 +228,7 @@ export function startAutoSync() {
 
 export async function connectDrive() {
   await drive.requestToken(true);
+  await drive.getAccountEmail().catch(() => undefined); // remember which account was chosen
   setStatus({ state: 'idle' });
   markDirty();
   await syncNow();
