@@ -169,18 +169,19 @@ export function Library({ onDetail, onRead, notify }: Props) {
             </section>
           )}
 
-          {atTop && !query && filter === 'all' && upNext && (
+          {atTop && !query && filter === 'all' && upNext.length > 0 && (
             <section className="shelf">
-              <div className="shelf-head">
-                <h2>Up next</h2>
-                <span className="muted small">
-                  After {upNext.after.title}
-                  {upNext.via !== upNext.after.series ? ` · ${upNext.via}` : ''}
-                </span>
-              </div>
+              <h2>Up next</h2>
               <div className="shelf-row">
-                {upNext.items.map((c) => (
-                  <ComicCard key={c.id} comic={c} progress={progress.get(c.id)} onOpen={() => open(c)} onSelect={() => onDetail(c)} />
+                {upNext.map(({ comic: c, after, via }) => (
+                  <ComicCard
+                    key={c.id}
+                    comic={c}
+                    progress={progress.get(c.id)}
+                    subtitle={`After ${after.title}${via !== after.series && via !== c.series ? ` · ${via}` : ''}`}
+                    onOpen={() => open(c)}
+                    onSelect={() => onDetail(c)}
+                  />
                 ))}
               </div>
             </section>

@@ -2,57 +2,63 @@ import type { Collection, Comic, Progress } from '../db';
 import { buildTree } from './folders';
 import { sortComics, statusOf } from './library';
 
-export interface UpNext {
-  after: Comic; // the comic you most recently finished
+export interface UpNextItem {
+  comic: Comic; // the immediate next issue
+  after: Comic; // the comic you finished that leads to it
   via: string; // where the order comes from: a collection, a series folder, or the series name
-  items: Comic[]; // what comes next, in order
 }
 
 /**
- * What to read after your most recently finished comic. Order comes from
- * (1) a reading-list collection holding it, (2) its series in the folder-aware Series view
- * (so Vol. 1 #7 leads into Vol. 2 #8), or (3) series + issue number.
- * Skips comics already finished or in progress (those live in "Continue reading").
+ * One suggestion per series you've finished something in: the issue right after the
+ * comic you most recently finished there, newest first. Order comes from (1) a reading-list
+ * collection holding that comic, (2) its series in the folder-aware Series view (so Vol. 1 #7
+ * leads into Vol. 2 #8), or (3) series + issue number. A series is left out when its next
+ * issue is already in progress (it's in "Continue reading") or when you've finished it all.
  */
-export function computeUpNext(comics: Comic[], progress: Map<string, Progress>, collections: Collection[], limit = 8): UpNext | null {
-  let after: Comic | undefined;
-  let latest = 0;
-  for (const c of comics) {
-    const p = progress.get(c.id);
-    if (p?.finished && p.lastReadAt > latest) {
-      latest = p.lastReadAt;
-      after = c;
-    }
-  }
-  if (!after) return null;
+export function computeUpNext(comics: Comic[], progress: Map<string, Progress>, collections: Collection[], limit = 12): UpNextItem[] {
+  const finished = comics
+    .filter((c) => progress.get(c.id)?.finished)
+    .sort((a, b) => (progress.get(b.id)?.lastReadAt ?? 0) - (progress.get(a.id)?.lastReadAt ?? 0));
+  if (!finished.length) return [];
 
-  const list = collections
-    .filter((col) => !col.smart && !col.deleted && col.comicIds.includes(after!.id))
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  let sequence: Comic[];
-  let via: string;
-  if (list) {
-    const byId = new Map(comics.map((c) => [c.id, c]));
-    sequence = list.comicIds.map((id) => byId.get(id)).filter(Boolean) as Comic[];
-    via = list.name;
-  } else {
-    const node = buildTree(comics).folders.find((n) => n.all.some((c) => c.id === after!.id));
-    if (node && node.all.length > 1) {
-      sequence = node.all;
+  const byId = new Map(comics.map((c) => [c.id, c]));
+  const lists = collections.filter((col) => !col.smart && !col.deleted).sort((a, b) => b.updatedAt - a.updatedAt);
+  const seriesNodes = buildTree(comics).folders;
+
+  const out: UpNextItem[] = [];
+  const doneSequences = new Set<string>();
+  const suggested = new Set<string>();
+
+  for (const after of finished) {
+    let key: string;
+    let via: string;
+    let sequence: () => Comic[];
+    const list = lists.find((col) => col.comicIds.includes(after.id));
+    const node = list ? undefined : seriesNodes.find((n) => n.all.length > 1 && n.all.some((c) => c.id === after.id));
+    if (list) {
+      key = `col:${list.id}`;
+      via = list.name;
+      sequence = () => list.comicIds.map((id) => byId.get(id)).filter(Boolean) as Comic[];
+    } else if (node) {
+      key = `node:${node.key}`;
       via = node.name;
+      sequence = () => node.all;
     } else {
-      sequence = sortComics(
-        comics.filter((c) => c.series === after!.series),
-        'series',
-      );
+      key = `series:${after.series.toLowerCase()}`;
       via = after.series;
+      sequence = () => sortComics(comics.filter((c) => c.series === after.series), 'series');
     }
-  }
+    // Only the most recently finished comic in each series decides its suggestion.
+    if (doneSequences.has(key)) continue;
+    doneSequences.add(key);
 
-  const i = sequence.findIndex((c) => c.id === after!.id);
-  const items = sequence
-    .slice(i + 1)
-    .filter((c) => statusOf(progress.get(c.id)) === 'unread')
-    .slice(0, limit);
-  return items.length ? { after, via, items } : null;
+    const seq = sequence();
+    const i = seq.findIndex((c) => c.id === after.id);
+    const next = seq.slice(i + 1).find((c) => statusOf(progress.get(c.id)) !== 'finished');
+    if (!next || statusOf(progress.get(next.id)) === 'reading' || suggested.has(next.id)) continue;
+    suggested.add(next.id);
+    out.push({ comic: next, after, via });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
