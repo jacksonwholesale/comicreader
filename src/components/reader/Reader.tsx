@@ -512,6 +512,10 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
   };
   const filter = prefs.brightness !== 100 ? `brightness(${prefs.brightness / 100})` : undefined;
 
+  const pageLabel = `${mode === 'guided' && guidedSteps.length > 1 ? `Panel ${step + 1}/${guidedSteps.length} · ` : ''}${
+    view.length === 2 && mode !== 'scroll' ? `Pages ${view[0] + 1}–${view[1] + 1}` : `Page ${(mode === 'scroll' ? page : lastVisible) + 1}`
+  } of ${pageCount}`;
+
   // − Fit/% + (top bar on desktop, bottom bar on phones); scroll mode zooms page width instead
   const zoomLevel = mode === 'scroll' ? scrollZoom : zoom.s;
   const atFit = Math.abs(zoomLevel - 1) < 0.01;
@@ -594,12 +598,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
 
       {prefs.warmth > 0 && <div className="warmth" style={{ opacity: (prefs.warmth / 100) * 0.45 }} />}
 
-      {prefs.showPageNumber && !ui && !atEnd && (
-        <div className="page-badge">
-          {mode === 'guided' && guidedSteps.length > 1 ? `${step + 1}/${guidedSteps.length} · ` : ''}
-          {view.length === 2 ? `${view[0] + 1}–${view[1] + 1}` : page + 1} / {pageCount}
-        </div>
-      )}
+      {prefs.alwaysShowPageNumber && !ui && !atEnd && <div className="page-badge">{pageLabel}</div>}
 
       {remoteHint && (
         <div className="toast reader-toast">
@@ -626,6 +625,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
             <button className="icon-btn hide-mobile" aria-label="Fullscreen" onClick={toggleFullscreen}><Maximize /></button>
           </header>
           <footer className="reader-bottom">
+            <div className="page-label">{pageLabel}</div>
             {zoomUi && <div className="show-mobile zoom-row">{zoomUi}</div>}
             <div className="scrubber" dir={direction}>
               <span>{lastVisible + 1}</span>

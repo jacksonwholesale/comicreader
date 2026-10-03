@@ -21,7 +21,7 @@ export interface Prefs {
   scrollWidth: number; // % of screen width used in vertical scroll mode (desktop)
   brightness: number; // 40..120 (%)
   warmth: number; // 0..100 — night-reading sepia overlay
-  showPageNumber: boolean;
+  alwaysShowPageNumber: boolean; // otherwise it shows only with the reader controls
   keepAwake: boolean;
   autoCrop: boolean; // trim scanner borders / white margins
   guidedShowFullPageFirst: boolean;
@@ -42,7 +42,7 @@ export const DEFAULT_PREFS: Prefs = {
   scrollWidth: 100,
   brightness: 100,
   warmth: 0,
-  showPageNumber: true,
+  alwaysShowPageNumber: false,
   keepAwake: true,
   autoCrop: false,
   guidedShowFullPageFirst: true,

@@ -82,7 +82,7 @@ export function PrefControls({ prefs, showDefaults = false }: { prefs: Prefs; sh
         <Seg value={prefs.background} onChange={(background) => setPrefs({ background })} options={[['black', 'Black'], ['gray', 'Gray'], ['white', 'White'], ['sepia', 'Sepia']]} />
         <Slider label="Brightness" value={prefs.brightness} min={40} max={120} unit="%" onChange={(brightness) => setPrefs({ brightness })} />
         <Slider label="Night warmth" value={prefs.warmth} min={0} max={100} unit="%" onChange={(warmth) => setPrefs({ warmth })} />
-        <Toggle label="Show page number" value={prefs.showPageNumber} onChange={(showPageNumber) => setPrefs({ showPageNumber })} />
+        <Toggle label="Always show page number" value={prefs.alwaysShowPageNumber} onChange={(alwaysShowPageNumber) => setPrefs({ alwaysShowPageNumber })} />
         <Toggle label="Keep screen awake while reading" value={prefs.keepAwake} onChange={(keepAwake) => setPrefs({ keepAwake })} />
       </section>
     </>
