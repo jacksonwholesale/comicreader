@@ -12,9 +12,10 @@ import { MoveDialog } from '../components/MoveDialog';
 import { computeUpNext, upNextKey } from '../lib/upNext';
 import { getPrefs, setPrefs, usePrefs } from '../lib/prefs';
 import { downloadMany, removeDownloads } from '../lib/sync';
-import { ComicCard, Cover } from '../components/ComicCard';
+import { ComicCard } from '../components/ComicCard';
 import { AddToCollection } from '../components/AddToCollection';
 import { ContextMenu } from '../components/ContextMenu';
+import { GroupCard } from '../components/GroupCard';
 import { CollectionsGrid } from './Collections';
 import type { Notify } from '../App';
 
@@ -162,6 +163,23 @@ export function Library({ onDetail, onRead, notify }: Props) {
   const shown = grouped ? sortComics(here.comics, sort === 'series' ? 'series' : sort, progress) : visible;
 
   const selecting = selectMode || selected.size > 0;
+  // selecting a stack selects every issue in it
+  const groupSelection = (g: FolderNode): 'all' | 'some' | 'none' => {
+    const n = g.all.filter((c) => selected.has(c.id)).length;
+    return n === 0 ? 'none' : n === g.all.length ? 'all' : 'some';
+  };
+  const toggleGroup = (g: FolderNode) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      const all = groupSelection(g) === 'all';
+      for (const c of g.all) all ? next.delete(c.id) : next.add(c.id);
+      return next;
+    });
+  // Collections view: what isn't in any of your collections yet, as series stacks
+  const looseTree = useMemo(() => {
+    const inCollections = new Set(collections.filter((c) => !c.smart && !c.deleted).flatMap((c) => c.comicIds));
+    return buildTree(visible.filter((c) => !inCollections.has(c.id)));
+  }, [visible, collections]);
   const endSelect = () => {
     setSelected(new Set());
     setSelectMode(false);
@@ -272,16 +290,14 @@ export function Library({ onDetail, onRead, notify }: Props) {
               ))}
             </div>
             <div className="row gap">
-              {!showCollections && (
-                <button className={`btn small${selecting ? ' on' : ''}`} onClick={() => (selecting ? endSelect() : setSelectMode(true))}>
-                  {selecting ? 'Done' : 'Select'}
-                </button>
-              )}
+              <button className={`btn small${selecting ? ' on' : ''}`} onClick={() => (selecting ? endSelect() : setSelectMode(true))}>
+                {selecting ? 'Done' : 'Select'}
+              </button>
               {atTop && (
                 <div className="segmented compact">
                   <button className={libView === 'issues' ? 'on' : ''} onClick={() => setLibView('issues')}>Issues</button>
                   <button className={libView === 'series' ? 'on' : ''} onClick={() => setLibView('series')}>Series</button>
-                  <button className={libView === 'collections' ? 'on' : ''} onClick={() => { endSelect(); setLibView('collections'); }}>Collections</button>
+                  <button className={libView === 'collections' ? 'on' : ''} onClick={() => setLibView('collections')}>Collections</button>
                 </div>
               )}
               {!showCollections && <select className="select" value={sort} onChange={(e) => { setSort(e.target.value as SortKey); localStorage.setItem('lib.sort', e.target.value); }} aria-label="Sort">
@@ -294,7 +310,36 @@ export function Library({ onDetail, onRead, notify }: Props) {
             </div>
           </div>
 
-          {showCollections && <CollectionsGrid query={query} fromLibrary newCard />}
+          {showCollections && (
+            <>
+              <CollectionsGrid query={query} fromLibrary newCard />
+              {looseTree.folders.length > 0 && (
+                <section className="loose">
+                  <div className="shelf-head">
+                    <h2>Not in a collection</h2>
+                    <span className="muted small">Select stacks and tap “Move to collection” to file them</span>
+                  </div>
+                  <div className="grid">
+                    {looseTree.folders.map((g) => (
+                      <GroupCard
+                        key={g.key}
+                        group={g}
+                        progress={progress}
+                        selecting={selecting}
+                        selected={groupSelection(g)}
+                        onToggle={() => toggleGroup(g)}
+                        onOpen={() => {
+                          setLibView('series');
+                          setFolderPath([g.key]);
+                        }}
+                        onMenu={(x, y) => setGroupMenu({ x, y, key: g.key })}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
 
           {!showCollections && !atTop && trail.length > 2 && (
             <nav className="crumbs lib-crumbs" aria-label="Folders">
@@ -310,12 +355,14 @@ export function Library({ onDetail, onRead, notify }: Props) {
           {!showCollections && grouped && here.folders.length > 0 && (
             <div className="grid">
               {here.folders.map((f) => {
-                const read = f.all.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
                 return (
                   <GroupCard
                     key={f.key}
                     group={f}
-                    read={read}
+                    progress={progress}
+                    selecting={selecting}
+                    selected={groupSelection(f)}
+                    onToggle={() => toggleGroup(f)}
                     onOpen={() => setFolderPath([...trail.slice(1).map((n) => n.key), f.key])}
                     onMenu={(x, y) => setGroupMenu({ x, y, key: f.key })}
                   />
@@ -347,7 +394,9 @@ export function Library({ onDetail, onRead, notify }: Props) {
         <div className="selection-bar">
           <span><strong>{selected.size}</strong> selected</span>
           <button className="btn small ghost" onClick={() => setSelected(new Set((grouped ? here.all : visible).map((c) => c.id)))}>All</button>
-          <button className="btn small" onClick={() => setAdding(true)}><FolderPlus size={16} /> <span className="hide-mobile">Collection</span></button>
+          <button className="btn small primary" disabled={!selected.size} title="Move to collection" onClick={() => setAdding(true)}>
+            <FolderPlus size={16} /> <span className="hide-mobile">Move to collection</span>
+          </button>
           <button className="btn small" title="Download for offline reading" onClick={() => { void downloadMany([...selected]); notify('Downloading for offline reading…'); endSelect(); }}>
             <CloudDownload size={16} /> <span className="hide-mobile">Download</span>
           </button>
@@ -447,7 +496,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
           ]}
         />
       )}
-      {adding && <AddToCollection comicIds={[...selected]} onClose={() => { setAdding(false); endSelect(); }} notify={notify} />}
+      {adding && <AddToCollection title="Move to collection" comicIds={[...selected]} onClose={() => { setAdding(false); endSelect(); }} notify={notify} />}
     </div>
   );
 }
@@ -464,49 +513,5 @@ function EmptyLibrary({ onFiles, onFolder }: { onFiles: () => void; onFolder: ()
       </div>
       <p className="muted small">CBZ · CBR · CB7 · CBT · PDF · EPUB · ZIP/RAR/7z/TAR · folders of JPG/PNG/WebP/AVIF images</p>
     </div>
-  );
-}
-
-/** A stacked-covers card for a group in the Series view; right-click / long-press for its menu. */
-function GroupCard({ group: f, read, onOpen, onMenu }: { group: FolderNode; read: number; onOpen: () => void; onMenu: (x: number, y: number) => void }) {
-  const timer = useRef<number>(undefined);
-  const longPressed = useRef(false);
-  return (
-    <button
-      className="card series-card"
-      onClick={() => {
-        if (longPressed.current) longPressed.current = false;
-        else onOpen();
-      }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        if (!longPressed.current) onMenu(e.clientX, e.clientY);
-      }}
-      onPointerDown={(e) => {
-        longPressed.current = false;
-        if (e.pointerType !== 'touch') return;
-        const { clientX, clientY } = e;
-        timer.current = window.setTimeout(() => {
-          longPressed.current = true;
-          onMenu(clientX, clientY);
-        }, 450);
-      }}
-      onPointerUp={() => clearTimeout(timer.current)}
-      onPointerLeave={() => clearTimeout(timer.current)}
-      onPointerCancel={() => clearTimeout(timer.current)}
-    >
-      <div className="card-cover stack">
-        {f.all.slice(0, 3).reverse().map((c, i, arr) => (
-          <Cover key={c.id} comic={c} className={`stack-${arr.length - 1 - i}`} />
-        ))}
-      </div>
-      <div className="card-meta">
-        <strong>{f.name}</strong>
-        <span>
-          {f.folders.length > 0 && `${f.folders.length} volume${f.folders.length === 1 ? '' : 's'} · `}
-          {f.all.length} issue{f.all.length === 1 ? '' : 's'} · {read} read
-        </span>
-      </div>
-    </button>
   );
 }

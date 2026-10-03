@@ -1,6 +1,6 @@
-import { ArrowDown, ArrowUp, BookOpen, FolderOpen, Pencil, ChevronLeft, Cloud, CloudDownload, CloudOff, HardDriveDownload, FolderPlus, Sparkles, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, BookOpen, Check, ChevronRight, FolderInput, FolderOpen, Pencil, ChevronLeft, Cloud, CloudDownload, CloudOff, HardDriveDownload, FolderPlus, Sparkles, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { Collection, Comic, SmartRule } from '../db';
+import type { Collection, Comic, Progress, SmartRule } from '../db';
 import { isConnected } from '../lib/drive';
 import { go } from '../lib/hooks';
 import { collectionMembers, isReadable, createCollection, deleteCollection, removeFromCollection, statusOf, updateCollection } from '../lib/library';
@@ -8,6 +8,9 @@ import { downloadMany, processDriveQueue, removeDownloads } from '../lib/sync';
 import { useLibrary } from '../lib/useLibrary';
 import { ComicCard, Cover } from '../components/ComicCard';
 import { Toggle } from '../components/reader/ReaderSettings';
+import { GroupCard } from '../components/GroupCard';
+import { AddToCollection } from '../components/AddToCollection';
+import { buildTree, findPath, type FolderNode } from '../lib/folders';
 import { TextPrompt } from '../components/TextPrompt';
 import { ContextMenu } from '../components/ContextMenu';
 import { Pressable } from '../components/Pressable';
@@ -133,16 +136,45 @@ export function CollectionsGrid({ query = '', fromLibrary = false, newCard = fal
   );
 }
 
-export function CollectionDetail({ id, onRead, onDetail, backTo = 'collections' }: { id: string; onRead: (id: string) => void; onDetail: (c: Comic) => void; backTo?: string }) {
+export function CollectionDetail({
+  id,
+  onRead,
+  onDetail,
+  notify,
+  backTo = 'collections',
+}: {
+  id: string;
+  onRead: (id: string) => void;
+  onDetail: (c: Comic) => void;
+  notify: (m: string) => void;
+  backTo?: string;
+}) {
   const { comics, progress, collections } = useLibrary();
   const col = collections.find((c) => c.id === id);
   const all = comics ?? [];
   const members = useMemo(() => (col ? collectionMembers(col, all, progress) : []), [col, all, progress]);
   const [editRules, setEditRules] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  // Stacks: grouped by series like the Library. List: your reading order, reorderable.
+  const [view, setViewState] = useState<'stacks' | 'list'>(() => (localStorage.getItem('col.view') as 'stacks' | 'list') || 'stacks');
+  const setView = (v: 'stacks' | 'list') => {
+    setViewState(v);
+    try {
+      localStorage.setItem('col.view', v);
+    } catch {}
+  };
+  const [path, setPath] = useState<string[]>([]);
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [moving, setMoving] = useState(false);
+  const tree = useMemo(() => buildTree(members), [members]);
 
   if (!col) return <div className="view"><p className="muted pad">Collection not found.</p></div>;
 
+  const endSelect = () => {
+    setSelecting(false);
+    setSelected(new Set());
+  };
   const read = members.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
   const nextUp = members.find((c) => statusOf(progress.get(c.id)) === 'reading') ?? members.find((c) => statusOf(progress.get(c.id)) === 'unread');
   const notInDrive = members.filter((c) => c.hasFile && !c.driveFileId).length;
@@ -217,7 +249,31 @@ export function CollectionDetail({ id, onRead, onDetail, backTo = 'collections' 
         {editRules && col.smart && <RuleEditor col={col} />}
       </div>
 
-      {col.smart ? (
+      <div className="toolbar">
+        <div className="segmented compact">
+          <button className={view === 'stacks' ? 'on' : ''} onClick={() => setView('stacks')}>Stacks</button>
+          <button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>{col.smart ? 'All issues' : 'Reading order'}</button>
+        </div>
+        {!col.smart && members.length > 0 && (
+          <button className={`btn small${selecting ? ' on' : ''}`} onClick={() => (selecting ? endSelect() : setSelecting(true))}>
+            {selecting ? 'Done' : 'Select'}
+          </button>
+        )}
+      </div>
+
+      {view === 'stacks' && members.length > 0 ? (
+        <CollectionStacks
+          tree={tree}
+          path={path}
+          setPath={setPath}
+          progress={progress}
+          selecting={selecting}
+          selected={selected}
+          setSelected={setSelected}
+          onOpenComic={(c) => (isReadable(c) ? onRead(c.id) : onDetail(c))}
+          onDetail={onDetail}
+        />
+      ) : col.smart ? (
         <div className="grid">
           {members.map((c) => (
             <ComicCard key={c.id} comic={c} progress={progress.get(c.id)} onOpen={() => (isReadable(c) ? onRead(c.id) : onDetail(c))} onSelect={() => onDetail(c)} />
@@ -248,8 +304,43 @@ export function CollectionDetail({ id, onRead, onDetail, backTo = 'collections' 
               </li>
             );
           })}
-          {!members.length && <p className="muted pad">Add comics from the Library: tap Select, choose some, then "Collection".</p>}
+          {!members.length && <p className="muted pad">Add comics from the Library: tap Select, choose issues or whole series, then “Move to collection”.</p>}
         </ol>
+      )}
+
+      {selecting && (
+        <div className="selection-bar">
+          <span><strong>{selected.size}</strong> selected</span>
+          <button className="btn small ghost" onClick={() => setSelected(new Set(members.map((c) => c.id)))}>All</button>
+          <button className="btn small primary" disabled={!selected.size} onClick={() => setMoving(true)}>
+            <FolderInput size={16} /> <span className="hide-mobile">Move to collection</span>
+          </button>
+          <button
+            className="btn small"
+            disabled={!selected.size}
+            onClick={() =>
+              void removeFromCollection(col.id, [...selected]).then(() => {
+                notify(`Removed ${selected.size} from "${col.name}"`);
+                endSelect();
+              })
+            }
+          >
+            <X size={16} /> <span className="hide-mobile">Remove</span>
+          </button>
+          <button className="icon-btn" onClick={endSelect} aria-label="Done"><Check /></button>
+        </div>
+      )}
+      {moving && (
+        <AddToCollection
+          title={`Move out of "${col.name}" to…`}
+          moveFrom={col.id}
+          comicIds={[...selected]}
+          notify={notify}
+          onClose={() => {
+            setMoving(false);
+            endSelect();
+          }}
+        />
       )}
       {renaming && (
         <TextPrompt title="Rename collection" initial={col.name} confirm="Rename" onSubmit={(name) => void updateCollection(col.id, { name })} onClose={() => setRenaming(false)} />
@@ -283,5 +374,87 @@ function RuleEditor({ col }: { col: Collection }) {
       </div>
       <Toggle label="Favorites only" value={!!r.favoritesOnly} onChange={(favoritesOnly) => save({ favoritesOnly })} />
     </div>
+  );
+}
+
+/** A collection's comics grouped into series stacks (Collection → Series → Issues). */
+function CollectionStacks({
+  tree,
+  path,
+  setPath,
+  progress,
+  selecting,
+  selected,
+  setSelected,
+  onOpenComic,
+  onDetail,
+}: {
+  tree: FolderNode;
+  path: string[];
+  setPath: (p: string[]) => void;
+  progress: Map<string, Progress>;
+  selecting: boolean;
+  selected: Set<string>;
+  setSelected: (fn: (s: Set<string>) => Set<string>) => void;
+  onOpenComic: (c: Comic) => void;
+  onDetail: (c: Comic) => void;
+}) {
+  const trail = findPath(tree, path);
+  const here = trail[trail.length - 1];
+  const sel = (g: FolderNode): 'all' | 'some' | 'none' => {
+    const n = g.all.filter((c) => selected.has(c.id)).length;
+    return n === 0 ? 'none' : n === g.all.length ? 'all' : 'some';
+  };
+  const toggleIds = (ids: string[], on: boolean) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      for (const id of ids) on ? next.add(id) : next.delete(id);
+      return next;
+    });
+  return (
+    <>
+      {trail.length > 1 && (
+        <nav className="crumbs lib-crumbs" aria-label="Series">
+          <button onClick={() => setPath([])}>All</button>
+          {trail.slice(1).map((n, i) => (
+            <span key={n.key} className="row">
+              <ChevronRight size={14} />
+              <button onClick={() => setPath(trail.slice(1, i + 2).map((x) => x.key))}>{n.name}</button>
+            </span>
+          ))}
+        </nav>
+      )}
+      {here.folders.length > 0 && (
+        <div className="grid">
+          {here.folders.map((g) => (
+            <GroupCard
+              key={g.key}
+              group={g}
+              progress={progress}
+              selecting={selecting}
+              selected={sel(g)}
+              onToggle={() => toggleIds(g.all.map((c) => c.id), sel(g) !== 'all')}
+              onOpen={() => setPath([...trail.slice(1).map((n) => n.key), g.key])}
+            />
+          ))}
+        </div>
+      )}
+      {here.folders.length > 0 && here.comics.length > 0 && <div className="grid-gap" />}
+      {here.comics.length > 0 && (
+        <div className="grid">
+          {here.comics.map((c) => (
+            <ComicCard
+              key={c.id}
+              comic={c}
+              progress={progress.get(c.id)}
+              selecting={selecting}
+              selected={selected.has(c.id)}
+              onOpen={() => onOpenComic(c)}
+              onSelect={() => (selecting ? toggleIds([c.id], !selected.has(c.id)) : onDetail(c))}
+            />
+          ))}
+        </div>
+      )}
+    </>
   );
 }

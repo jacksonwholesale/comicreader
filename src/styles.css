@@ -466,3 +466,4 @@ label.btn { cursor: pointer; }
 .page-label { text-align: center; font-size: 13px; font-weight: 600; color: #dde; font-variant-numeric: tabular-nums; margin-bottom: 6px; }
 .new-stack { display: grid; place-items: center; border-radius: 8px; color: var(--text-3); border: 2px dashed var(--line); }
 .new-collection-card:hover .new-stack { color: var(--accent); border-color: var(--accent); }
+.loose { margin-top: 30px; }

@@ -1,28 +1,32 @@
 import { Check, Cloud, Plus, X } from 'lucide-react';
 import { useState } from 'react';
-import { addToCollection, createCollection } from '../lib/library';
+import { addToCollection, createCollection, removeFromCollection } from '../lib/library';
 import { useLibrary } from '../lib/useLibrary';
 
 interface Props {
   comicIds: string[];
   onClose: () => void;
   notify: (msg: string) => void;
+  title?: string;
+  /** moving out of this collection (it's left out of the list and the comics are removed from it) */
+  moveFrom?: string;
 }
 
-export function AddToCollection({ comicIds, onClose, notify }: Props) {
+export function AddToCollection({ comicIds, onClose, notify, title = 'Add to collection', moveFrom }: Props) {
   const { collections } = useLibrary();
   const [name, setName] = useState('');
-  const manual = collections.filter((c) => !c.smart).sort((a, b) => b.updatedAt - a.updatedAt);
+  const manual = collections.filter((c) => !c.smart && c.id !== moveFrom).sort((a, b) => b.updatedAt - a.updatedAt);
   const add = async (id: string, label: string) => {
     await addToCollection(id, comicIds);
-    notify(`Added ${comicIds.length > 1 ? `${comicIds.length} comics ` : ''}to ${label}`);
+    if (moveFrom) await removeFromCollection(moveFrom, comicIds);
+    notify(`${moveFrom || title.startsWith('Move') ? 'Moved' : 'Added'} ${comicIds.length > 1 ? `${comicIds.length} comics ` : ''}to ${label}`);
     onClose();
   };
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="sheet small-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-head">
-          <h3>Add to collection</h3>
+          <h3>{title}</h3>
           <button className="icon-btn" onClick={onClose} aria-label="Close"><X /></button>
         </div>
         <form

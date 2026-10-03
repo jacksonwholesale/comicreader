@@ -102,7 +102,7 @@ export function App() {
         {section === 'collections' ? (
           <Collections />
         ) : section === 'collection' && arg ? (
-          <CollectionDetail id={arg} onRead={read} onDetail={setDetail} backTo={route[2] === 'lib' ? '' : 'collections'} />
+          <CollectionDetail id={arg} onRead={read} onDetail={setDetail} notify={notify} backTo={route[2] === 'lib' ? '' : 'collections'} />
         ) : section === 'stats' ? (
           <Stats onRead={read} />
         ) : section === 'settings' ? (
