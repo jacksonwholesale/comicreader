@@ -70,10 +70,10 @@ export function CollectionsGrid({ query = '', fromLibrary = false, newCard = fal
   const open = (id: string) => go(`collection/${id}${fromLibrary ? '/lib' : ''}`);
   return (
     <>
-      <div className="grid wide">
+      <div className="grid">
         {newCard && (
           <button className="card collection-card new-collection-card" onClick={() => setCreating(true)}>
-            <div className="mosaic new-mosaic">
+            <div className="card-cover new-stack">
               <FolderPlus size={34} strokeWidth={1.5} />
             </div>
             <div className="card-meta">
@@ -87,9 +87,13 @@ export function CollectionsGrid({ query = '', fromLibrary = false, newCard = fal
           const read = members.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
           return (
             <Pressable key={col.id} className="card collection-card" onOpen={() => open(col.id)} onMenu={(x, y) => setMenu({ x, y, col })}>
-              <div className="mosaic">
-                {members.slice(0, 4).map((c) => <Cover key={c.id} comic={c} />)}
-                {!members.length && <div className="cover-blank">{col.name.slice(0, 1)}</div>}
+              {/* stacked covers, same as Series groups: the first three comics in the collection */}
+              <div className="card-cover stack">
+                {members.length ? (
+                  members.slice(0, 3).reverse().map((c, i, arr) => <Cover key={c.id} comic={c} className={`stack-${arr.length - 1 - i}`} />)
+                ) : (
+                  <div className="cover cover-blank">{col.name.slice(0, 1)}</div>
+                )}
               </div>
               <div className="card-meta">
                 <strong>

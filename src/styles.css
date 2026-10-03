@@ -464,5 +464,5 @@ label.btn { cursor: pointer; }
 .notice-panel .steps { padding-left: 20px; margin: 8px 0; }
 .copy-box { display: block; padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; user-select: all; }
 .page-label { text-align: center; font-size: 13px; font-weight: 600; color: #dde; font-variant-numeric: tabular-nums; margin-bottom: 6px; }
-.new-mosaic { display: grid; place-items: center; grid-template-columns: 1fr; color: var(--text-3); border: 2px dashed var(--line); background: transparent; }
-.new-collection-card:hover .new-mosaic { color: var(--accent); border-color: var(--accent); }
+.new-stack { display: grid; place-items: center; border-radius: 8px; color: var(--text-3); border: 2px dashed var(--line); }
+.new-collection-card:hover .new-stack { color: var(--accent); border-color: var(--accent); }
