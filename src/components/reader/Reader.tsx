@@ -155,9 +155,15 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
   // ---- guided view: panels for the current page ----
   useEffect(() => {
     if (mode !== 'guided' || page === null) return;
-    const u = urls.get(page);
-    if (!u || panels.has(page)) return;
-    detectPanels(u, direction).then((r) => setPanels((m) => new Map(m).set(page, r)), () => setPanels((m) => new Map(m).set(page, [])));
+    // this page, plus the next one so the hand-off between pages is instant
+    for (const p of [page, page + 1]) {
+      const u = urls.get(p);
+      if (!u || panels.has(p)) continue;
+      detectPanels(u, direction).then(
+        (r) => setPanels((m) => new Map(m).set(p, r.rects)),
+        () => setPanels((m) => new Map(m).set(p, [])),
+      );
+    }
   }, [mode, page, urls, panels, direction]);
   const guidedSteps = useMemo(() => {
     if (mode !== 'guided' || page === null) return [] as (Rect | null)[];
