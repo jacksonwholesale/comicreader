@@ -4,6 +4,7 @@ import { FOLDER_MIME, hasFolderAccess, listChildren, listSharedFolders, requestT
 import { detectFormat } from '../lib/archive';
 import { getLinkedFolders, linkFolder, onFoldersChanged, scanLinkedFolders, unlinkFolder, useDriveLibraryStatus, type LinkedFolder } from '../lib/driveLibrary';
 import { timeAgo } from '../lib/library';
+import { getRarIssues } from '../lib/remote';
 
 /** Settings section: Drive folders that make up the cloud library. */
 export function DriveFolders({ notify }: { notify: (m: string) => void }) {
@@ -84,6 +85,7 @@ export function DriveFolders({ notify }: { notify: (m: string) => void }) {
               ? `Checked ${timeAgo(status.lastScan ?? (Number(localStorage.getItem('driveLibrary.lastScan')) || undefined))}. New files are picked up automatically.`
               : ''}
       </p>
+      <RarIssues />
       {picking && (
         <FolderPicker
           onClose={() => setPicking(false)}
@@ -159,5 +161,22 @@ function FolderPicker({ onClose, onPick }: { onClose: () => void; onPick: (f: { 
         </div>
       </div>
     </div>
+  );
+}
+
+function RarIssues() {
+  const issues = Object.entries(getRarIssues());
+  if (!issues.length) return null;
+  return (
+    <details className="rar-issues">
+      <summary className="muted small">{issues.length} CBR file{issues.length === 1 ? '' : 's'} can't stream page by page (they download whole instead)</summary>
+      <ul>
+        {issues.map(([name, why]) => (
+          <li key={name} className="small">
+            <strong>{name}</strong> — {why}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }

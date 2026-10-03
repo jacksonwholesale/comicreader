@@ -450,3 +450,4 @@ label.btn { cursor: pointer; }
 .context-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0; background: transparent; border-radius: 8px; text-align: left; font-size: 14px; font-weight: 600; }
 .context-menu button:hover { background: var(--surface-2); }
 .toast-action { border: 0; background: transparent; color: var(--accent); font-weight: 800; padding: 2px 4px; }
+.rar-issues { margin-top: 8px; } .rar-issues ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); }

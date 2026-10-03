@@ -137,7 +137,22 @@ export async function openForReading(
   try {
     if (size && (comic.format === 'cbz' || comic.format === 'epub')) return await sourceFromArchive(await openRemoteZip(comic.driveFileId, size));
     if (size && comic.format === 'pdf') return await openRemotePdf(comic.driveFileId, size);
-    if (size && comic.format === 'cbr') return await openRemoteRar(comic, onStatus);
+    if (size && comic.format === 'cbr') {
+      try {
+        const src = await openRemoteRar(comic, onStatus);
+        try {
+          await src.pageUrl(0); // prove pages really come out before committing to streaming
+          return src;
+        } catch (e) {
+          src.close();
+          throw e;
+        }
+      } catch (e) {
+        noteRarIssue(comic, e);
+        onStatus?.('Loading from Google Drive…');
+        // fall through to the whole-file download below
+      }
+    }
   } catch (e) {
     if (!(e instanceof NotStreamable) && !(e instanceof RarNotSplittable)) throw e;
     // mislabelled or unusual file: fall back to fetching it whole
@@ -162,7 +177,7 @@ export async function rarCoverFromDrive(comic: Comic): Promise<Blob | null> {
     const first = sortPages(index.entries.map((e) => e.name))[0];
     return await readRarEntry(comic.driveFileId, index, index.entries.find((e) => e.name === first)!);
   } catch (e) {
-    if (!(e instanceof RarNotSplittable)) throw e;
+    noteRarIssue(comic, e);
   }
   for (const mb of [4, 16]) {
     const end = Math.min(comic.size, mb * 1024 * 1024) - 1;
@@ -170,4 +185,21 @@ export async function rarCoverFromDrive(comic: Comic): Promise<Blob | null> {
     if (img || end >= comic.size - 1) return img;
   }
   return null;
+}
+
+/** CBRs that couldn't be read page by page, and why (shown in Settings; per device). */
+export function getRarIssues(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem('rar.issues') || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function noteRarIssue(comic: Comic, e: unknown) {
+  const issues = getRarIssues();
+  issues[comic.fileName] = e instanceof RarNotSplittable ? `can't stream: ${e.message}` : `error: ${(e as Error)?.message ?? e}`;
+  try {
+    localStorage.setItem('rar.issues', JSON.stringify(issues));
+  } catch {}
 }

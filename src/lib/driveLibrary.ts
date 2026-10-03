@@ -233,7 +233,8 @@ async function buildCovers() {
             setStatus({ covers: { done: ++done, total: todo.length } });
             continue;
           }
-          if (c.coverTiny || c.size > MAX_WHOLE_FILE) {
+          // quick methods failed: fall back to the whole file, as before, when it's not huge
+          if (c.size > MAX_WHOLE_FILE) {
             setStatus({ covers: { done: ++done, total: todo.length } });
             continue;
           }
