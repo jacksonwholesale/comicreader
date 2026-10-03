@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "description": "Cross-device comic reader with library, collections and Google Drive sync",
   "scripts": {
+    "predev": "node scripts/copy-pdf-decoders.mjs",
+    "prebuild": "node scripts/copy-pdf-decoders.mjs",
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host",

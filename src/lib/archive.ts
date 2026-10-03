@@ -308,7 +308,8 @@ export async function openPdfWith(params: (pdfjs: PdfJs) => object): Promise<Com
   const pdfjs = await import('pdfjs-dist');
   const { default: workerUrl } = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-  const task = pdfjs.getDocument(params(pdfjs));
+  // wasmUrl: JPEG 2000 / JBIG2 decoders (copied to public/pdfjs by scripts/copy-pdf-decoders.mjs)
+  const task = pdfjs.getDocument({ wasmUrl: new URL('pdfjs/wasm/', document.baseURI).href, ...params(pdfjs) });
   const doc = await task.promise;
   const target = Math.min(2400, Math.max(1400, Math.round(screen.height * devicePixelRatio)));
   const c = urlCache(async (i) => {
