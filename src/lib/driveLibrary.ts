@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from 'react';
 import { db, getKV, setKV, type Comic } from '../db';
-import { detectFormat, parseFileName } from './archive';
-import { FOLDER_MIME, hasFolderAccess, isConnected, listChildren, type DriveItem } from './drive';
+import { detectFormat, openComic, parseFileName } from './archive';
+import { downloadComic, FOLDER_MIME, hasFolderAccess, isConnected, listChildren, type DriveItem } from './drive';
+import { getRarIndex } from './rar';
 import { applyCoverImage, applySourceInfo } from './importer';
 import { openForReading, rarCoverFromDrive, streamsPageByPage } from './remote';
 import { markDirty } from './syncState';
@@ -211,47 +212,78 @@ async function buildCovers() {
       localStorage.setItem('driveLibrary.cbrCovers', '2');
       markDirty();
     }
-    const todo = (await db.comics.toArray()).filter(
-      (c) =>
-        !c.deleted &&
-        !c.hasFile &&
-        c.driveFileId &&
-        !c.cover &&
-        // CBR: cover from the first few MB. 7z/TAR must be downloaded whole; only do that once
-        // (the cover then syncs to other devices).
-        (streamsPageByPage(c) || c.format === 'cbr' || (!c.coverTiny && c.size <= MAX_WHOLE_FILE)),
-    );
-    setStatus({ covers: { done: 0, total: todo.length } });
+    const todo = (await db.comics.toArray())
+      .filter(
+        (c) =>
+          !c.deleted &&
+          !c.hasFile &&
+          c.driveFileId &&
+          !c.cover &&
+          // CBZ/EPUB/PDF: cheap (first page only), so every device makes its own sharp cover.
+          // CBR/7z/TAR: only when no device has made one yet (the small cover then syncs).
+          (streamsPageByPage(c) || !c.coverTiny),
+      )
+      .sort((a, b) => a.size - b.size); // small files first so most covers show up quickly
     let done = 0;
-    for (const c of todo) {
-      if (!navigator.onLine) break;
+    setStatus({ covers: { done, total: todo.length } });
+    const one = async (c: Comic) => {
+      if (!navigator.onLine) return;
       try {
-        if (c.format === 'cbr') {
-          const img = await rarCoverFromDrive(c);
-          if (img) {
-            await applyCoverImage(c.id, img);
-            setStatus({ covers: { done: ++done, total: todo.length } });
-            continue;
+        if (streamsPageByPage(c)) {
+          const src = await openForReading(c);
+          try {
+            await applySourceInfo(c.id, src);
+          } finally {
+            src.close();
           }
-          // quick methods failed: fall back to the whole file, as before, when it's not huge
-          if (c.size > MAX_WHOLE_FILE) {
-            setStatus({ covers: { done: ++done, total: todo.length } });
-            continue;
+        } else if (c.size <= MAX_WHOLE_FILE) {
+          // the proven way: fetch the file once, take its first page (sorted like the reader)
+          const src = await openComic(await downloadComic(c.driveFileId!), c.fileName);
+          try {
+            await applySourceInfo(c.id, src);
+          } finally {
+            src.close();
           }
-        }
-        const src = await openForReading(c);
-        try {
-          await applySourceInfo(c.id, src);
-        } finally {
-          src.close();
+        } else if (c.format === 'cbr') {
+          // huge CBRs: page index (or the start of the file), never the whole thing
+          const img = await withTimeout(rarCoverFromDrive(c), 5 * 60_000);
+          if (img) await applyCoverImage(c.id, img);
         }
       } catch {
         /* skip files that fail; they still open from the reader with an error message */
       }
       setStatus({ covers: { done: ++done, total: todo.length } });
-    }
+    };
+    // two at a time
+    const queue = [...todo];
+    await Promise.all([0, 1].map(async () => {
+      for (let c = queue.shift(); c; c = queue.shift()) await one(c);
+    }));
   } finally {
     coversRunning = false;
     setStatus({ covers: { done: 0, total: 0 } });
   }
+  void buildRarIndexes();
+}
+
+/** Afterwards, quietly prepare page indexes so CBRs open page by page without a wait. */
+let indexing = false;
+async function buildRarIndexes() {
+  if (indexing) return;
+  indexing = true;
+  try {
+    const cbrs = (await db.comics.toArray())
+      .filter((c) => c.format === 'cbr' && !c.deleted && !c.hasFile && c.driveFileId && c.size)
+      .sort((a, b) => a.size - b.size);
+    for (const c of cbrs) {
+      if (!navigator.onLine) break;
+      await withTimeout(getRarIndex(c.driveFileId!, c.size, c.driveModified), 5 * 60_000).catch(() => {});
+    }
+  } finally {
+    indexing = false;
+  }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timed out')), ms))]);
 }
