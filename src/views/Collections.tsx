@@ -13,16 +13,8 @@ import { ContextMenu } from '../components/ContextMenu';
 import { Pressable } from '../components/Pressable';
 
 export function Collections() {
-  const { comics, progress, collections } = useLibrary();
-  const all = comics ?? [];
-  const sorted = [...collections].sort((a, b) => a.name.localeCompare(b.name));
+  const { collections } = useLibrary();
   const [creating, setCreating] = useState<'manual' | 'smart' | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; col: Collection } | null>(null);
-  const [renaming, setRenaming] = useState<Collection | null>(null);
-  const make = async (name: string, smart: boolean) => {
-    const id = await createCollection(name, smart ? { smart: { status: 'any' } } : {});
-    go(`collection/${id}`);
-  };
   return (
     <div className="view">
       <header className="view-head">
@@ -32,7 +24,7 @@ export function Collections() {
           <button className="btn primary" onClick={() => setCreating('manual')}><FolderPlus size={18} /><span className="hide-mobile">New collection</span></button>
         </div>
       </header>
-      {!sorted.length ? (
+      {!collections.length ? (
         <div className="empty">
           <FolderPlus size={44} strokeWidth={1.3} />
           <h2>Group comics your way</h2>
@@ -42,35 +34,75 @@ export function Collections() {
           </p>
         </div>
       ) : (
-        <div className="grid wide">
-          {sorted.map((col) => {
-            const members = collectionMembers(col, all, progress);
-            const read = members.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
-            return (
-              <Pressable key={col.id} className="card collection-card" onOpen={() => go(`collection/${col.id}`)} onMenu={(x, y) => setMenu({ x, y, col })}>
-                <div className="mosaic">
-                  {members.slice(0, 4).map((c) => <Cover key={c.id} comic={c} />)}
-                  {!members.length && <div className="cover-blank">{col.name.slice(0, 1)}</div>}
-                </div>
-                <div className="card-meta">
-                  <strong>
-                    {col.smart && <Sparkles size={14} className="accent" />} {col.name} {col.driveSync ? <Cloud size={14} className="muted" /> : null}
-                  </strong>
-                  <span>{members.length} comics · {read} read</span>
-                </div>
-              </Pressable>
-            );
-          })}
-        </div>
+        <CollectionsGrid />
       )}
-      {creating && (
-        <TextPrompt
-          title={creating === 'smart' ? 'New smart collection' : 'New collection'}
-          confirm="Create"
-          onSubmit={(name) => void make(name, creating === 'smart')}
-          onClose={() => setCreating(null)}
-        />
-      )}
+      {creating && <NewCollectionPrompt smart={creating === 'smart'} onClose={() => setCreating(null)} />}
+    </div>
+  );
+}
+
+export function NewCollectionPrompt({ smart, fromLibrary, onClose }: { smart: boolean; fromLibrary?: boolean; onClose: () => void }) {
+  return (
+    <TextPrompt
+      title={smart ? 'New smart collection' : 'New collection'}
+      confirm="Create"
+      onSubmit={async (name) => {
+        const id = await createCollection(name, smart ? { smart: { status: 'any' } } : {});
+        go(`collection/${id}${fromLibrary ? '/lib' : ''}`);
+      }}
+      onClose={onClose}
+    />
+  );
+}
+
+/**
+ * Collection cards (Collections tab, and the Library's "Collections" view).
+ * Tap opens; right-click / long-press for Rename / Delete.
+ */
+export function CollectionsGrid({ query = '', fromLibrary = false, newCard = false }: { query?: string; fromLibrary?: boolean; newCard?: boolean }) {
+  const { comics, progress, collections } = useLibrary();
+  const all = comics ?? [];
+  const q = query.trim().toLowerCase();
+  const sorted = [...collections].filter((c) => !q || c.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+  const [menu, setMenu] = useState<{ x: number; y: number; col: Collection } | null>(null);
+  const [renaming, setRenaming] = useState<Collection | null>(null);
+  const [creating, setCreating] = useState(false);
+  const open = (id: string) => go(`collection/${id}${fromLibrary ? '/lib' : ''}`);
+  return (
+    <>
+      <div className="grid wide">
+        {newCard && (
+          <button className="card collection-card new-collection-card" onClick={() => setCreating(true)}>
+            <div className="mosaic new-mosaic">
+              <FolderPlus size={34} strokeWidth={1.5} />
+            </div>
+            <div className="card-meta">
+              <strong>New collection</strong>
+              <span>A reading list in your order</span>
+            </div>
+          </button>
+        )}
+        {sorted.map((col) => {
+          const members = collectionMembers(col, all, progress);
+          const read = members.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
+          return (
+            <Pressable key={col.id} className="card collection-card" onOpen={() => open(col.id)} onMenu={(x, y) => setMenu({ x, y, col })}>
+              <div className="mosaic">
+                {members.slice(0, 4).map((c) => <Cover key={c.id} comic={c} />)}
+                {!members.length && <div className="cover-blank">{col.name.slice(0, 1)}</div>}
+              </div>
+              <div className="card-meta">
+                <strong>
+                  {col.smart && <Sparkles size={14} className="accent" />} {col.name} {col.driveSync ? <Cloud size={14} className="muted" /> : null}
+                </strong>
+                <span>{members.length} comics · {read} read</span>
+              </div>
+            </Pressable>
+          );
+        })}
+      </div>
+      {q && !sorted.length && <p className="muted center pad">No collections match.</p>}
+      {creating && <NewCollectionPrompt smart={false} fromLibrary={fromLibrary} onClose={() => setCreating(false)} />}
       {renaming && (
         <TextPrompt title="Rename collection" initial={renaming.name} confirm="Rename" onSubmit={(name) => void updateCollection(renaming.id, { name })} onClose={() => setRenaming(null)} />
       )}
@@ -80,7 +112,7 @@ export function Collections() {
           y={menu.y}
           onClose={() => setMenu(null)}
           items={[
-            { label: 'Open', icon: <FolderOpen size={16} />, onClick: () => go(`collection/${menu.col.id}`) },
+            { label: 'Open', icon: <FolderOpen size={16} />, onClick: () => open(menu.col.id) },
             { label: 'Rename', icon: <Pencil size={16} />, onClick: () => setRenaming(menu.col) },
             {
               label: 'Delete collection',
@@ -93,11 +125,11 @@ export function Collections() {
           ]}
         />
       )}
-    </div>
+    </>
   );
 }
 
-export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead: (id: string) => void; onDetail: (c: Comic) => void }) {
+export function CollectionDetail({ id, onRead, onDetail, backTo = 'collections' }: { id: string; onRead: (id: string) => void; onDetail: (c: Comic) => void; backTo?: string }) {
   const { comics, progress, collections } = useLibrary();
   const col = collections.find((c) => c.id === id);
   const all = comics ?? [];
@@ -121,7 +153,7 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
   return (
     <div className="view">
       <header className="view-head">
-        <button className="icon-btn" onClick={() => go('collections')} aria-label="Back"><ChevronLeft /></button>
+        <button className="icon-btn" onClick={() => go(backTo)} aria-label="Back"><ChevronLeft /></button>
         <h1>{col.name}</h1>
         <button className="icon-btn" aria-label="Rename collection" title="Rename" onClick={() => setRenaming(true)}>
           <Pencil size={18} />
@@ -130,7 +162,7 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
         <button
           className="icon-btn danger"
           aria-label="Delete collection"
-          onClick={() => confirm(`Delete the collection "${col.name}"? The comics stay in your library.`) && void deleteCollection(col.id).then(() => go('collections'))}
+          onClick={() => confirm(`Delete the collection "${col.name}"? The comics stay in your library.`) && void deleteCollection(col.id).then(() => go(backTo))}
         >
           <Trash2 />
         </button>

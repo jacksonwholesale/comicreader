@@ -14,6 +14,7 @@ import { downloadMany, removeDownloads } from '../lib/sync';
 import { ComicCard, Cover } from '../components/ComicCard';
 import { AddToCollection } from '../components/AddToCollection';
 import { ContextMenu } from '../components/ContextMenu';
+import { CollectionsGrid } from './Collections';
 import type { Notify } from '../App';
 
 type Filter = 'all' | 'unread' | 'reading' | 'finished' | 'favorites' | 'downloaded' | 'cloud' | 'missing';
@@ -39,7 +40,18 @@ export function Library({ onDetail, onRead, notify }: Props) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>(() => (sessionStorage.getItem('lib.filter') as Filter) || 'all');
   const [sort, setSort] = useState<SortKey>(() => (localStorage.getItem('lib.sort') as SortKey) || 'series');
-  const [grouped, setGrouped] = useState(() => localStorage.getItem('lib.grouped') === '1');
+  type LibView = 'issues' | 'series' | 'collections';
+  const [libView, setLibViewState] = useState<LibView>(
+    () => (localStorage.getItem('lib.view') as LibView) || (localStorage.getItem('lib.grouped') === '1' ? 'series' : 'issues'),
+  );
+  const setLibView = (v: LibView) => {
+    setLibViewState(v);
+    try {
+      localStorage.setItem('lib.view', v);
+    } catch {}
+  };
+  const grouped = libView === 'series';
+  const showCollections = libView === 'collections';
   // where we are in the Series view (folder keys), kept while you pop into the reader and back
   const [folderPath, setFolderPathState] = useState<string[]>(() => {
     try {
@@ -243,33 +255,38 @@ export function Library({ onDetail, onRead, notify }: Props) {
 
           <div className="toolbar">
             <div className="chips">
-              {[...FILTERS, ...(all.some((c) => c.driveMissing) ? [['missing', 'Missing from Drive'] as [Filter, string]] : [])].map(([f, label]) => (
+              {!showCollections && [...FILTERS, ...(all.some((c) => c.driveMissing) ? [['missing', 'Missing from Drive'] as [Filter, string]] : [])].map(([f, label]) => (
                 <button key={f} className={`chip${filter === f ? ' on' : ''}`} onClick={() => { setFilter(f); sessionStorage.setItem('lib.filter', f); }}>
                   {label}
                 </button>
               ))}
             </div>
             <div className="row gap">
-              <button className={`btn small${selecting ? ' on' : ''}`} onClick={() => (selecting ? endSelect() : setSelectMode(true))}>
-                {selecting ? 'Done' : 'Select'}
-              </button>
+              {!showCollections && (
+                <button className={`btn small${selecting ? ' on' : ''}`} onClick={() => (selecting ? endSelect() : setSelectMode(true))}>
+                  {selecting ? 'Done' : 'Select'}
+                </button>
+              )}
               {atTop && (
                 <div className="segmented compact">
-                  <button className={!grouped ? 'on' : ''} onClick={() => { setGrouped(false); localStorage.setItem('lib.grouped', '0'); }}>Issues</button>
-                  <button className={grouped ? 'on' : ''} onClick={() => { setGrouped(true); localStorage.setItem('lib.grouped', '1'); }}>Series</button>
+                  <button className={libView === 'issues' ? 'on' : ''} onClick={() => setLibView('issues')}>Issues</button>
+                  <button className={libView === 'series' ? 'on' : ''} onClick={() => setLibView('series')}>Series</button>
+                  <button className={libView === 'collections' ? 'on' : ''} onClick={() => { endSelect(); setLibView('collections'); }}>Collections</button>
                 </div>
               )}
-              <select className="select" value={sort} onChange={(e) => { setSort(e.target.value as SortKey); localStorage.setItem('lib.sort', e.target.value); }} aria-label="Sort">
+              {!showCollections && <select className="select" value={sort} onChange={(e) => { setSort(e.target.value as SortKey); localStorage.setItem('lib.sort', e.target.value); }} aria-label="Sort">
                 <option value="series">Series & issue</option>
                 <option value="recent">Recently read</option>
                 <option value="added">Recently added</option>
                 <option value="title">Title</option>
                 <option value="year">Year</option>
-              </select>
+              </select>}
             </div>
           </div>
 
-          {!atTop && trail.length > 2 && (
+          {showCollections && <CollectionsGrid query={query} fromLibrary newCard />}
+
+          {!showCollections && !atTop && trail.length > 2 && (
             <nav className="crumbs lib-crumbs" aria-label="Folders">
               <button onClick={() => setFolderPath([])}>Library</button>
               {trail.slice(1, -1).map((n, i) => (
@@ -280,7 +297,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
               ))}
             </nav>
           )}
-          {grouped && here.folders.length > 0 && (
+          {!showCollections && grouped && here.folders.length > 0 && (
             <div className="grid">
               {here.folders.map((f) => {
                 const read = f.all.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
@@ -297,7 +314,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
             </div>
           )}
           {grouped && here.folders.length > 0 && shown.length > 0 && <div className="grid-gap" />}
-          {(!grouped || !atTop || here.folders.length === 0) && (
+          {!showCollections && (!grouped || !atTop || here.folders.length === 0) && (
             <div className="grid">
               {shown.map((c) => (
                 <ComicCard
@@ -312,7 +329,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
               ))}
             </div>
           )}
-          {!visible.length && <p className="muted center pad">Nothing matches.</p>}
+          {!showCollections && !visible.length && <p className="muted center pad">Nothing matches.</p>}
         </>
       )}
 

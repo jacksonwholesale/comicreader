@@ -97,12 +97,12 @@ export function App() {
 
   return (
     <div className="app">
-      <Nav section={section ?? ''} />
+      <Nav section={section === 'collection' && route[2] === 'lib' ? '' : section ?? ''} />
       <main className="main">
         {section === 'collections' ? (
           <Collections />
         ) : section === 'collection' && arg ? (
-          <CollectionDetail id={arg} onRead={read} onDetail={setDetail} />
+          <CollectionDetail id={arg} onRead={read} onDetail={setDetail} backTo={route[2] === 'lib' ? '' : 'collections'} />
         ) : section === 'stats' ? (
           <Stats onRead={read} />
         ) : section === 'settings' ? (
