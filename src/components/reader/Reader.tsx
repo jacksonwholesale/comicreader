@@ -28,7 +28,7 @@ import { device } from '../../lib/syncState';
 import { buildSpreads, layoutPage, type Dims } from './layout';
 import { PageImage } from './PageImage';
 import { ReaderSettings } from './ReaderSettings';
-import { ScrollView } from './ScrollView';
+import { ScrollView, stepScrollZoom } from './ScrollView';
 import { PageGrid } from './PageGrid';
 
 interface Props {
@@ -61,6 +61,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
   const [dims, setDims] = useState<Map<number, Dims>>(new Map());
   const [crops, setCrops] = useState<Map<number, Rect | null>>(new Map());
   const [zoom, setZoom] = useState<Zoom>(NO_ZOOM);
+  const [scrollZoom, setScrollZoom] = useState(1); // scroll mode: 1 = page-width fit
   const [drag, setDrag] = useState(0);
   const [trackAnim, setTrackAnim] = useState(false);
   const [slide, setSlide] = useState<{ to: number; dir: number } | null>(null);
@@ -288,13 +289,16 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
           break;
         case '+':
         case '=':
-          setZoom((z) => zoomAt(z, 1.25, box.w / 2, box.h / 2, box));
+          if (mode === 'scroll') setScrollZoom((z) => stepScrollZoom(z, 1.25));
+          else setZoom((z) => zoomAt(z, 1.25, box.w / 2, box.h / 2, box));
           break;
         case '-':
-          setZoom((z) => zoomAt(z, 0.8, box.w / 2, box.h / 2, box));
+          if (mode === 'scroll') setScrollZoom((z) => stepScrollZoom(z, 0.8));
+          else setZoom((z) => zoomAt(z, 0.8, box.w / 2, box.h / 2, box));
           break;
         case '0':
-          setZoom(NO_ZOOM);
+          if (mode === 'scroll') setScrollZoom(1);
+          else setZoom(NO_ZOOM);
           break;
         case 'Escape':
           if (panel !== 'none') setPanel('none');
@@ -517,6 +521,8 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
             onTap={(x, y, w, h) => (tapZone(x, y, w, h, 'edges') === 'center' || ui ? setUi((u) => !u) : undefined)}
             gap={prefs.scrollGap}
             widthPct={prefs.scrollWidth}
+            zoom={scrollZoom}
+            onZoom={setScrollZoom}
           />
         </div>
       ) : (
@@ -586,19 +592,25 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
               <strong>{comic.title}</strong>
               <span>{comic.series}{comic.number ? ` #${comic.number}` : ''}</span>
             </div>
-            {mode !== 'scroll' && mode !== 'guided' && (
-              <div className={`zoom-controls${isFit(zoom) ? ' at-fit' : ''}`}>
-                <button className="icon-btn hide-mobile" aria-label="Zoom out" title="Zoom out (−)" onClick={() => setZoom((z) => ({ ...zoomAt(z, 0.8, box.w / 2, box.h / 2, box), animate: true }))}>
-                  <ZoomOut />
-                </button>
-                <button className="zoom-pct" title="Back to page fit (0)" onClick={() => setZoom({ ...NO_ZOOM, animate: true })}>
-                  {isFit(zoom) ? 'Fit' : `${Math.round(zoom.s * 100)}%`}
-                </button>
-                <button className="icon-btn hide-mobile" aria-label="Zoom in" title="Zoom in (+)" onClick={() => setZoom((z) => ({ ...zoomAt(z, 1.25, box.w / 2, box.h / 2, box), animate: true }))}>
-                  <ZoomIn />
-                </button>
-              </div>
-            )}
+            {mode !== 'guided' && (() => {
+              const level = mode === 'scroll' ? scrollZoom : zoom.s;
+              const fit = Math.abs(level - 1) < 0.01;
+              const step = (f: number) =>
+                mode === 'scroll' ? setScrollZoom((z) => stepScrollZoom(z, f)) : setZoom((z) => ({ ...zoomAt(z, f, box.w / 2, box.h / 2, box), animate: true }));
+              return (
+                <div className={`zoom-controls${fit ? ' at-fit' : ''}`}>
+                  <button className="icon-btn hide-mobile" aria-label="Zoom out" title="Zoom out (−)" onClick={() => step(0.8)}>
+                    <ZoomOut />
+                  </button>
+                  <button className="zoom-pct" title="Back to page fit (0)" onClick={() => (mode === 'scroll' ? setScrollZoom(1) : setZoom({ ...NO_ZOOM, animate: true }))}>
+                    {fit ? 'Fit' : `${Math.round(level * 100)}%`}
+                  </button>
+                  <button className="icon-btn hide-mobile" aria-label="Zoom in" title="Zoom in (+)" onClick={() => step(1.25)}>
+                    <ZoomIn />
+                  </button>
+                </div>
+              );
+            })()}
             <button className="icon-btn" aria-label="Bookmark" onClick={() => void toggleBookmark(comicId, lastVisible)}>
               {bookmarked ? <BookmarkCheck className="accent" /> : <Bookmark />}
             </button>
