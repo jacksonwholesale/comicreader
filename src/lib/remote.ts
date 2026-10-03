@@ -1,5 +1,6 @@
 import { db, type Comic } from '../db';
-import { firstImageFromRarHead, openComic, openPdfWith, sourceFromArchive, type ArchiveReader, type ComicSource } from './archive';
+import { firstImageFromRarHead, openComic, openPdfWith, sortPages, sourceFromArchive, urlCache, type ArchiveReader, type ComicSource } from './archive';
+import { getRarIndex, RarNotSplittable, readRarEntry } from './rar';
 import { downloadComic, fetchRange } from './drive';
 
 /**
@@ -113,7 +114,21 @@ async function openRemotePdf(fileId: string, size: number): Promise<ComicSource>
  * Opens a comic for reading: from the device if downloaded, otherwise streamed from Drive.
  * onProgress reports download progress for formats that must be fetched whole.
  */
-export async function openForReading(comic: Comic, onProgress?: (fraction: number) => void): Promise<ComicSource> {
+/** A CBR in Drive, page by page via its cached header index. */
+async function openRemoteRar(comic: Comic, onStatus?: (text: string) => void): Promise<ComicSource> {
+  const fileId = comic.driveFileId!;
+  const index = await getRarIndex(fileId, comic.size, comic.driveModified, (n) => onStatus?.(`Preparing pages… ${n}`));
+  const byName = new Map(index.entries.map((e) => [e.name, e]));
+  const names = sortPages([...byName.keys()]);
+  const c = urlCache((i) => readRarEntry(fileId, index, byName.get(names[i])!), names.length);
+  return { format: 'cbr', pageCount: names.length, pageUrl: c.pageUrl, close: c.release };
+}
+
+export async function openForReading(
+  comic: Comic,
+  onProgress?: (fraction: number) => void,
+  onStatus?: (text: string) => void,
+): Promise<ComicSource> {
   const local = await db.files.get(comic.id);
   if (local) return openComic(local.blob, comic.fileName);
   if (!comic.driveFileId) throw new Error('This comic is not downloaded on this device and is not in Google Drive.');
@@ -122,8 +137,9 @@ export async function openForReading(comic: Comic, onProgress?: (fraction: numbe
   try {
     if (size && (comic.format === 'cbz' || comic.format === 'epub')) return await sourceFromArchive(await openRemoteZip(comic.driveFileId, size));
     if (size && comic.format === 'pdf') return await openRemotePdf(comic.driveFileId, size);
+    if (size && comic.format === 'cbr') return await openRemoteRar(comic, onStatus);
   } catch (e) {
-    if (!(e instanceof NotStreamable)) throw e;
+    if (!(e instanceof NotStreamable) && !(e instanceof RarNotSplittable)) throw e;
     // mislabelled or unusual file: fall back to fetching it whole
   }
   const blob = await downloadComic(comic.driveFileId, onProgress);
@@ -135,9 +151,19 @@ export function streamsPageByPage(comic: Comic) {
   return comic.format === 'cbz' || comic.format === 'epub' || comic.format === 'pdf';
 }
 
-/** Cover of a CBR in Drive from its first few MB, without downloading the whole file. */
+/**
+ * Cover of a CBR in Drive without downloading it: page 1 by sorted name via the header index,
+ * or (for solid archives that can't be split) the first image stored in the file.
+ */
 export async function rarCoverFromDrive(comic: Comic): Promise<Blob | null> {
   if (!comic.driveFileId || !comic.size) return null;
+  try {
+    const index = await getRarIndex(comic.driveFileId, comic.size, comic.driveModified);
+    const first = sortPages(index.entries.map((e) => e.name))[0];
+    return await readRarEntry(comic.driveFileId, index, index.entries.find((e) => e.name === first)!);
+  } catch (e) {
+    if (!(e instanceof RarNotSplittable)) throw e;
+  }
   for (const mb of [4, 16]) {
     const end = Math.min(comic.size, mb * 1024 * 1024) - 1;
     const img = await firstImageFromRarHead(await fetchRange(comic.driveFileId, 0, end));

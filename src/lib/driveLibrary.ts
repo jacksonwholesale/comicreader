@@ -203,6 +203,14 @@ async function buildCovers() {
   if (coversRunning) return;
   coversRunning = true;
   try {
+    if (localStorage.getItem('driveLibrary.cbrCovers') !== '2') {
+      // covers from the earlier "first stored image" shortcut could be the wrong page
+      await db.comics
+        .filter((c) => c.format === 'cbr' && !c.hasFile && !!c.driveFileId && !c.deleted)
+        .modify({ cover: undefined, coverTiny: undefined, updatedAt: Date.now() });
+      localStorage.setItem('driveLibrary.cbrCovers', '2');
+      markDirty();
+    }
     const todo = (await db.comics.toArray()).filter(
       (c) =>
         !c.deleted &&

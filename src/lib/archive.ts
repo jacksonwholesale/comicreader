@@ -14,7 +14,7 @@ export interface ComicSource {
 
 /** Natural sort so "page2" comes before "page10". */
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-function sortPages(names: string[]) {
+export function sortPages(names: string[]) {
   return names
     .filter((n) => IMAGE_RE.test(n) && !/(^|\/)(__MACOSX|\.)/.test(n))
     .sort(collator.compare);
@@ -248,26 +248,31 @@ async function unrarWasm() {
 }
 
 /**
- * First image stored in a RAR, from just the beginning of the file. Comic RARs almost always
- * store the cover first, so a few MB is enough even for a 400 MB collected edition.
- * Returns null if that image doesn't fit in the bytes given.
+ * Best cover guess from just the beginning of a RAR (used for solid archives, which can't be
+ * read page by page): of the images that fit in the bytes given, the one whose name sorts first.
+ * Returns null if no complete image fits.
  */
 export async function firstImageFromRarHead(head: Uint8Array): Promise<Blob | null> {
   const { createExtractorFromData } = await import('node-unrar-js');
   const wasmBinary = await unrarWasm();
+  let best: { name: string; bytes: Uint8Array } | null = null;
   try {
     const data = head.buffer.slice(head.byteOffset, head.byteOffset + head.byteLength) as ArrayBuffer;
     const extractor = await createExtractorFromData({ wasmBinary, data });
     (extractor as any).unrar.extractor = extractor;
     const files = extractor.extract({ files: (h) => !h.flags.directory && IMAGE_RE.test(h.name) && !/(^|\/)(__MACOSX|\.)/.test(h.name) }).files;
-    for (const f of files) {
-      if (f.extraction) return new Blob([f.extraction as BlobPart], { type: mimeFor(f.fileHeader.name) });
-      break;
+    // Keep every image that fits; the cover is whichever sorts first (scanner tags often come first in storage order).
+    try {
+      for (const f of files) {
+        if (f.extraction && (!best || collator.compare(f.fileHeader.name, best.name) < 0)) best = { name: f.fileHeader.name, bytes: f.extraction };
+      }
+    } catch {
+      /* ran past the end of the bytes we fetched */
     }
   } catch {
-    /* ran past the end of the bytes we fetched */
+    /* not readable */
   }
-  return null;
+  return best ? new Blob([best.bytes as BlobPart], { type: mimeFor(best.name) }) : null;
 }
 
 async function openRar(blob: Blob): Promise<ComicSource> {

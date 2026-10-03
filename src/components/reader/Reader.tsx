@@ -53,7 +53,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
 
   const [source, setSource] = useState<ComicSource | null>(null);
   const [error, setError] = useState<string>();
-  const [loading, setLoading] = useState<{ streaming: boolean; progress?: number }>({ streaming: false });
+  const [loading, setLoading] = useState<{ streaming: boolean; progress?: number; text?: string }>({ streaming: false });
   const [page, setPage] = useState<number | null>(null); // anchor page (first page of the current view)
   const [ui, setUi] = useState(false);
   const [panel, setPanel] = useState<'none' | 'settings' | 'pages'>('none');
@@ -88,7 +88,11 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
       const c = await db.comics.get(comicId);
       if (!c) throw new Error('Comic not found.');
       if (!c.hasFile) setLoading({ streaming: true, progress: undefined });
-      src = await openForReading(c, (progress) => setLoading({ streaming: true, progress }));
+      src = await openForReading(
+        c,
+        (progress) => setLoading({ streaming: true, progress }),
+        (text) => setLoading({ streaming: true, text }),
+      );
       if (cancelled) return src.close();
       if (src.pageCount === 0) throw new Error('No pages found in this file.');
       // page count, ComicInfo and covers for comics only known from Drive so far
@@ -466,7 +470,8 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
         <div className="spinner" />
         {loading.streaming && (
           <p>
-            {loading.progress === undefined ? 'Opening from Google Drive…' : `Loading from Google Drive… ${Math.round(loading.progress * 100)}%`}
+            {loading.text ??
+              (loading.progress === undefined ? 'Opening from Google Drive…' : `Loading from Google Drive… ${Math.round(loading.progress * 100)}%`)}
           </p>
         )}
         <button className="btn ghost small" onClick={onClose}>Cancel</button>
