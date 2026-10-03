@@ -6,17 +6,21 @@ export function Pressable({
   onOpen,
   onMenu,
   children,
+  drop,
 }: {
   className?: string;
   onOpen: () => void;
   onMenu: (x: number, y: number) => void;
   children: ReactNode;
+  /** drop-target id (see lib/dnd) */
+  drop?: string;
 }) {
   const timer = useRef<number>(undefined);
   const longPressed = useRef(false);
   return (
     <button
       className={className}
+      data-drop={drop}
       onClick={() => {
         if (longPressed.current) longPressed.current = false;
         else onOpen();

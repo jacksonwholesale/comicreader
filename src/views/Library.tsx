@@ -1,10 +1,10 @@
 import { BookOpen, CheckCheck, FolderInput, Pencil, ChevronLeft, Info, ChevronRight, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Comic } from '../db';
 import { ACCEPT, IMAGE_ACCEPT } from '../lib/archive';
 import { collectFromDirectory, fromFileList } from '../lib/importer';
 import { queueImport } from '../lib/importQueue';
-import { deleteComics, isReadable, removeFromContinueReading, setFinished, setShelves, sortComics, statusOf, type SortKey } from '../lib/library';
+import { addToCollection, createCollection, deleteComics, isReadable, removeFromContinueReading, setFinished, setShelves, sortComics, statusOf, type SortKey } from '../lib/library';
 import { useLibrary } from '../lib/useLibrary';
 import { allGroups, buildTree, findPath, shownPaths, type FolderNode } from '../lib/folders';
 import { TextPrompt } from '../components/TextPrompt';
@@ -16,6 +16,7 @@ import { ComicCard } from '../components/ComicCard';
 import { AddToCollection } from '../components/AddToCollection';
 import { ContextMenu } from '../components/ContextMenu';
 import { GroupCard } from '../components/GroupCard';
+import { setDropHandler, type DragPayload } from '../lib/dnd';
 import { CollectionsGrid } from './Collections';
 import type { Notify } from '../App';
 
@@ -150,6 +151,33 @@ export function Library({ onDetail, onRead, notify }: Props) {
     setFolderPath([]);
     notify(target.length ? `Moved "${g.name}" into "${target[target.length - 1]}"` : `Moved "${g.name}" to the top`);
   };
+  // Drag and drop: onto a collection (adds), a group (moves into it) or "New collection".
+  const [dropNew, setDropNew] = useState<DragPayload | null>(null);
+  useEffect(() => {
+    setDropHandler(async (p, target) => {
+      const what = p.kind === 'group' ? `"${p.label}" (${p.ids.length})` : `"${p.label}"`;
+      if (target.startsWith('col:')) {
+        const col = collections.find((c) => c.id === target.slice(4));
+        if (!col) return;
+        await addToCollection(col.id, p.ids);
+        notify(`Added ${what} to ${col.name}`);
+      } else if (target === 'newcol') {
+        setDropNew(p);
+      } else if (target.startsWith('group:')) {
+        const key = target.slice(6);
+        if (p.kind === 'group' && (key === p.key || key.startsWith(`${p.key}/`))) return; // onto itself
+        const g = groupByKey(key);
+        if (!g) return;
+        if (p.kind === 'group') await moveGroup(p.key, g.path);
+        else {
+          await setShelves(p.ids.map((id) => ({ id, shelf: g.path })));
+          notify(`Moved ${what} into "${g.name}"`);
+        }
+      }
+    });
+    return () => setDropHandler(null);
+  });
+
   const resetGroup = async (key: string) => {
     const g = groupByKey(key);
     if (!g) return;
@@ -328,6 +356,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
                         selecting={selecting}
                         selected={groupSelection(g)}
                         onToggle={() => toggleGroup(g)}
+                        dropTarget
                         onOpen={() => {
                           setLibView('series');
                           setFolderPath([g.key]);
@@ -363,6 +392,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
                     selecting={selecting}
                     selected={groupSelection(f)}
                     onToggle={() => toggleGroup(f)}
+                    dropTarget
                     onOpen={() => setFolderPath([...trail.slice(1).map((n) => n.key), f.key])}
                     onMenu={(x, y) => setGroupMenu({ x, y, key: f.key })}
                   />
@@ -395,7 +425,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
           <span><strong>{selected.size}</strong> selected</span>
           <button className="btn small ghost" onClick={() => setSelected(new Set((grouped ? here.all : visible).map((c) => c.id)))}>All</button>
           <button className="btn small primary" disabled={!selected.size} title="Move to collection" onClick={() => setAdding(true)}>
-            <FolderPlus size={16} /> <span className="hide-mobile">Move to collection</span>
+            <FolderPlus size={16} /> <span>To collection</span>
           </button>
           <button className="btn small" title="Download for offline reading" onClick={() => { void downloadMany([...selected]); notify('Downloading for offline reading…'); endSelect(); }}>
             <CloudDownload size={16} /> <span className="hide-mobile">Download</span>
@@ -422,6 +452,19 @@ export function Library({ onDetail, onRead, notify }: Props) {
           </button>
           <button className="icon-btn" onClick={endSelect} aria-label="Cancel selection"><X /></button>
         </div>
+      )}
+      {dropNew && (
+        <TextPrompt
+          title="New collection"
+          hint={`With ${dropNew.kind === 'group' ? `"${dropNew.label}" (${dropNew.ids.length} issues)` : `"${dropNew.label}"`} in it.`}
+          confirm="Create"
+          onSubmit={async (name) => {
+            const id = await createCollection(name);
+            await addToCollection(id, dropNew.ids);
+            notify(`Created "${name}"`);
+          }}
+          onClose={() => setDropNew(null)}
+        />
       )}
       {upNextMenu && (
         <ContextMenu

@@ -9,6 +9,7 @@ import { usePrefs } from './lib/prefs';
 import { dismissTransfer } from './lib/sync';
 import { useSyncStatus, useTransfers } from './lib/useLibrary';
 import { ComicDetail } from './components/ComicDetail';
+import { DragLayer } from './components/DragLayer';
 import { Reader } from './components/reader/Reader';
 import { CollectionDetail, Collections } from './views/Collections';
 import { Library } from './views/Library';
@@ -114,6 +115,7 @@ export function App() {
 
       {detail && <ComicDetail comic={detail} onClose={() => setDetail(null)} onRead={read} notify={notify} />}
       <Activity />
+      <DragLayer />
       {toast && (
         <div className="toast">
           <span>{toast.text}</span>

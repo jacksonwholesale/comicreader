@@ -467,3 +467,13 @@ label.btn { cursor: pointer; }
 .new-stack { display: grid; place-items: center; border-radius: 8px; color: var(--text-3); border: 2px dashed var(--line); }
 .new-collection-card:hover .new-stack { color: var(--accent); border-color: var(--accent); }
 .loose { margin-top: 30px; }
+
+/* drag and drop */
+.drag-ghost { position: fixed; left: 0; top: 0; z-index: 120; width: 72px; pointer-events: none; display: flex; flex-direction: column; gap: 4px; align-items: center; opacity: 0.92; }
+.drag-ghost .cover { width: 72px; height: 108px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55); transform: rotate(-4deg); }
+.drag-label { max-width: 160px; padding: 3px 8px; border-radius: 99px; background: var(--text); color: var(--bg); font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.dragging, body.dragging * { cursor: grabbing !important; user-select: none !important; }
+[data-drop] .card-cover { transition: transform 0.12s, box-shadow 0.12s; }
+.drop-over .card-cover { transform: scale(1.06); box-shadow: 0 0 0 3px var(--accent), 0 12px 30px rgba(0, 0, 0, 0.4); border-radius: 10px; }
+.drop-over .card-meta strong { color: var(--accent); }
+.card { -webkit-touch-callout: none; touch-action: manipulation; }

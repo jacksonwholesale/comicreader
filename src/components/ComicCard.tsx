@@ -1,8 +1,8 @@
 import { Check, CloudDownload, CloudOff, Heart } from 'lucide-react';
-import { useRef } from 'react';
 import type { Comic, Progress } from '../db';
 import { useBlobUrl } from '../lib/hooks';
 import { percentOf, statusOf } from '../lib/library';
+import { usePressDrag } from '../lib/dnd';
 
 interface Props {
   comic: Comic;
@@ -29,33 +29,16 @@ export function Cover({ comic, className = '' }: { comic: Comic; className?: str
 export function ComicCard({ comic, progress, selected, selecting, onOpen, onSelect, onMenu, subtitle }: Props) {
   const status = statusOf(progress);
   const pct = percentOf(progress, comic);
-  const pressTimer = useRef<number>(undefined);
-  const longPressed = useRef(false);
-  const pressAt = useRef({ x: 0, y: 0 });
-  const secondary = (x: number, y: number) => (onMenu && !selecting ? onMenu(x, y) : onSelect());
+  // tap opens; right-click / hold for the menu; drag onto a collection or group
+  const press = usePressDrag({
+    onTap: () => (selecting ? onSelect() : onOpen()),
+    onMenu: (x, y) => (onMenu && !selecting ? onMenu(x, y) : onSelect()),
+    getPayload: () => (selecting ? null : { kind: 'comics', ids: [comic.id], label: comic.title, cover: comic }),
+  });
   return (
     <button
       className={`card${selected ? ' selected' : ''}${!comic.hasFile ? ' remote' : ''}${comic.driveMissing ? ' missing' : ''}`}
-      onClick={() => {
-        if (longPressed.current) return void (longPressed.current = false);
-        selecting ? onSelect() : onOpen();
-      }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        if (!longPressed.current) secondary(e.clientX, e.clientY);
-      }}
-      onPointerDown={(e) => {
-        longPressed.current = false;
-        pressAt.current = { x: e.clientX, y: e.clientY };
-        if (e.pointerType === 'touch')
-          pressTimer.current = window.setTimeout(() => {
-            longPressed.current = true;
-            secondary(pressAt.current.x, pressAt.current.y);
-          }, 450);
-      }}
-      onPointerUp={() => clearTimeout(pressTimer.current)}
-      onPointerLeave={() => clearTimeout(pressTimer.current)}
-      onPointerCancel={() => clearTimeout(pressTimer.current)}
+      {...press}
       title={comic.title}
     >
       <div className="card-cover">

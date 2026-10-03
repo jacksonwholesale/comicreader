@@ -1,8 +1,8 @@
 import { Check } from 'lucide-react';
-import { useRef } from 'react';
 import type { Progress } from '../db';
 import type { FolderNode } from '../lib/folders';
 import { statusOf } from '../lib/library';
+import { usePressDrag } from '../lib/dnd';
 import { Cover } from './ComicCard';
 
 interface Props {
@@ -10,6 +10,8 @@ interface Props {
   progress: Map<string, Progress>;
   onOpen: () => void;
   onMenu?: (x: number, y: number) => void;
+  /** other things can be dropped onto this group (moves them into it) */
+  dropTarget?: boolean;
   /** select mode: tapping toggles the whole group */
   selecting?: boolean;
   selected?: 'all' | 'some' | 'none';
@@ -17,36 +19,18 @@ interface Props {
 }
 
 /** A stacked-covers card for a group (series / folder); right-click / long-press for its menu. */
-export function GroupCard({ group: f, progress, onOpen, onMenu, selecting, selected = 'none', onToggle }: Props) {
-  const timer = useRef<number>(undefined);
-  const longPressed = useRef(false);
+export function GroupCard({ group: f, progress, onOpen, onMenu, dropTarget, selecting, selected = 'none', onToggle }: Props) {
+  const press = usePressDrag({
+    onTap: () => (selecting ? onToggle?.() : onOpen()),
+    onMenu: (x, y) => (selecting ? onToggle?.() : onMenu?.(x, y)),
+    getPayload: () => (selecting ? null : { kind: 'group', key: f.key, ids: f.all.map((c) => c.id), label: f.name, cover: f.all[0] }),
+  });
   const read = f.all.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
   return (
     <button
       className={`card series-card${selected === 'all' ? ' selected' : ''}`}
-      onClick={() => {
-        if (longPressed.current) longPressed.current = false;
-        else if (selecting) onToggle?.();
-        else onOpen();
-      }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        if (longPressed.current) return;
-        if (selecting) onToggle?.();
-        else onMenu?.(e.clientX, e.clientY);
-      }}
-      onPointerDown={(e) => {
-        longPressed.current = false;
-        if (e.pointerType !== 'touch' || selecting || !onMenu) return;
-        const { clientX, clientY } = e;
-        timer.current = window.setTimeout(() => {
-          longPressed.current = true;
-          onMenu(clientX, clientY);
-        }, 450);
-      }}
-      onPointerUp={() => clearTimeout(timer.current)}
-      onPointerLeave={() => clearTimeout(timer.current)}
-      onPointerCancel={() => clearTimeout(timer.current)}
+      data-drop={dropTarget ? `group:${f.key}` : undefined}
+      {...press}
     >
       <div className="card-cover stack">
         {f.all.slice(0, 3).reverse().map((c, i, arr) => (

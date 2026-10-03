@@ -75,7 +75,7 @@ export function CollectionsGrid({ query = '', fromLibrary = false, newCard = fal
     <>
       <div className="grid">
         {newCard && (
-          <button className="card collection-card new-collection-card" onClick={() => setCreating(true)}>
+          <button className="card collection-card new-collection-card" data-drop="newcol" onClick={() => setCreating(true)}>
             <div className="card-cover new-stack">
               <FolderPlus size={34} strokeWidth={1.5} />
             </div>
@@ -89,7 +89,7 @@ export function CollectionsGrid({ query = '', fromLibrary = false, newCard = fal
           const members = collectionMembers(col, all, progress);
           const read = members.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
           return (
-            <Pressable key={col.id} className="card collection-card" onOpen={() => open(col.id)} onMenu={(x, y) => setMenu({ x, y, col })}>
+            <Pressable key={col.id} className="card collection-card" drop={col.smart ? undefined : `col:${col.id}`} onOpen={() => open(col.id)} onMenu={(x, y) => setMenu({ x, y, col })}>
               {/* stacked covers, same as Series groups: the first three comics in the collection */}
               <div className="card-cover stack">
                 {members.length ? (
