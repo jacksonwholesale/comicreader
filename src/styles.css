@@ -428,3 +428,5 @@ label.btn { cursor: pointer; }
 .picker-foot { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--line); }
 .notice { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: 12px; background: var(--accent-soft); margin: 10px 0; font-size: 14px; }
 .subhead { margin: 18px 0 4px; font-size: 15px; }
+.grid-gap { height: 26px; }
+.lib-crumbs { padding: 0 0 14px; }

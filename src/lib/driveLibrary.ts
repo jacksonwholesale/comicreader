@@ -91,19 +91,23 @@ export async function unlinkFolder(id: string) {
 
 const isComicName = (name: string) => detectFormat(name) !== null;
 
-async function walk(folderId: string, depth = 0): Promise<DriveItem[]> {
+/** Every comic file under a folder, with the names of the folders leading to it (below the linked one). */
+async function walk(folderId: string, path: string[] = []): Promise<(DriveItem & { path: string[] })[]> {
   const children = await listChildren(folderId);
-  const out: DriveItem[] = [];
+  const out: (DriveItem & { path: string[] })[] = [];
   for (const c of children) {
     if (c.mimeType === FOLDER_MIME) {
-      if (depth < 8) out.push(...(await walk(c.id, depth + 1)));
-    } else if (isComicName(c.name)) out.push(c);
+      if (path.length < 8) out.push(...(await walk(c.id, [...path, c.name])));
+    } else if (isComicName(c.name)) out.push({ ...c, path });
   }
   return out;
 }
 
+const samePath = (a?: string[], b?: string[]) => (a ?? []).join('/') === (b ?? []).join('/');
+
 let scanning: Promise<void> | null = null;
 const SCAN_EVERY = 10 * 60_000;
+const SCAN_VERSION = '2'; // 2: folder paths
 
 /** Looks for new, changed and removed files in linked folders. */
 export function scanLinkedFolders(force = false): Promise<void> {
@@ -112,6 +116,8 @@ export function scanLinkedFolders(force = false): Promise<void> {
     const { value: folders } = await getLinkedFolders();
     if (!folders.length || !isConnected() || !hasFolderAccess()) return;
     const last = Number(localStorage.getItem('driveLibrary.lastScan')) || 0;
+    // bump SCAN_VERSION when scans start recording something new, so existing libraries refresh once
+    if (localStorage.getItem('driveLibrary.version') !== SCAN_VERSION) force = true;
     if (!force && Date.now() - last < SCAN_EVERY) {
       setStatus({ lastScan: last });
       void buildCovers();
@@ -132,7 +138,8 @@ export function scanLinkedFolders(force = false): Promise<void> {
           const existing = byDriveId.get(f.id) ?? all.find((c) => c.id === `d_${f.id}`);
           // Uploaded from the app (lives under its own id): already in the library.
           if (existing && existing.id !== `d_${f.id}` && !existing.deleted) continue;
-          if (existing && !existing.deleted && existing.driveModified === f.modifiedTime && existing.fileName === f.name) continue;
+          if (existing && !existing.deleted && existing.driveModified === f.modifiedTime && existing.fileName === f.name && samePath(existing.drivePath, f.path) && existing.driveFolderId === folder.id)
+            continue;
           // You removed it from the library: stay removed unless the file in Drive changes.
           if (existing?.deleted && existing.driveModified === f.modifiedTime) continue;
           const replaced = existing && !existing.deleted && existing.driveModified !== f.modifiedTime;
@@ -154,6 +161,7 @@ export function scanLinkedFolders(force = false): Promise<void> {
             size: f.size ?? 0,
             driveFileId: f.id,
             driveFolderId: folder.id,
+            drivePath: f.path,
             driveModified: f.modifiedTime,
             deleted: 0,
             updatedAt: now,
@@ -173,6 +181,7 @@ export function scanLinkedFolders(force = false): Promise<void> {
       }
       const t = Date.now();
       localStorage.setItem('driveLibrary.lastScan', String(t));
+      localStorage.setItem('driveLibrary.version', SCAN_VERSION);
       setStatus({ scanning: false, lastScan: t });
       if (changed) markDirty();
       void buildCovers();

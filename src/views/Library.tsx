@@ -1,4 +1,4 @@
-import { CheckCheck, ChevronLeft, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { CheckCheck, ChevronLeft, ChevronRight, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import type { Comic } from '../db';
 import { ACCEPT, IMAGE_ACCEPT } from '../lib/archive';
@@ -6,6 +6,7 @@ import { collectFromDirectory, fromFileList } from '../lib/importer';
 import { queueImport } from '../lib/importQueue';
 import { deleteComics, setFinished, sortComics, statusOf, type SortKey } from '../lib/library';
 import { useLibrary } from '../lib/useLibrary';
+import { buildTree, findPath } from '../lib/folders';
 import { downloadMany, removeDownloads } from '../lib/sync';
 import { ComicCard, Cover } from '../components/ComicCard';
 import { AddToCollection } from '../components/AddToCollection';
@@ -34,7 +35,20 @@ export function Library({ onDetail, onRead, notify }: Props) {
   const [filter, setFilter] = useState<Filter>(() => (sessionStorage.getItem('lib.filter') as Filter) || 'all');
   const [sort, setSort] = useState<SortKey>(() => (localStorage.getItem('lib.sort') as SortKey) || 'series');
   const [grouped, setGrouped] = useState(() => localStorage.getItem('lib.grouped') === '1');
-  const [series, setSeries] = useState<string | null>(null);
+  // where we are in the Series view (folder keys), kept while you pop into the reader and back
+  const [folderPath, setFolderPathState] = useState<string[]>(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem('lib.path') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const setFolderPath = (p: string[]) => {
+    setFolderPathState(p);
+    try {
+      sessionStorage.setItem('lib.path', JSON.stringify(p));
+    } catch {}
+  };
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -46,7 +60,6 @@ export function Library({ onDetail, onRead, notify }: Props) {
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = all.filter((c) => {
-      if (series !== null && c.series !== series) return false;
       if (q && ![c.title, c.series, c.writer, c.artist, c.publisher, c.fileName].join(' ').toLowerCase().includes(q)) return false;
       const st = statusOf(progress.get(c.id));
       switch (filter) {
@@ -64,7 +77,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
       return true;
     });
     return sortComics(list, sort, progress);
-  }, [all, query, filter, sort, series, progress]);
+  }, [all, query, filter, sort, progress]);
 
   const continueReading = useMemo(
     () =>
@@ -76,15 +89,11 @@ export function Library({ onDetail, onRead, notify }: Props) {
     [all, progress],
   );
 
-  const seriesGroups = useMemo(() => {
-    const m = new Map<string, Comic[]>();
-    for (const c of visible) m.set(c.series, [...(m.get(c.series) ?? []), c]);
-    return [...m.entries()].map(([name, items]) => ({
-      name,
-      items: sortComics(items, 'series'),
-      read: items.filter((c) => statusOf(progress.get(c.id)) === 'finished').length,
-    }));
-  }, [visible, progress]);
+  const tree = useMemo(() => buildTree(visible), [visible]);
+  const trail = grouped ? findPath(tree, folderPath) : [tree];
+  const here = trail[trail.length - 1];
+  const atTop = trail.length === 1;
+  const shown = grouped ? sortComics(here.comics, sort === 'series' ? 'series' : sort, progress) : visible;
 
   const selecting = selectMode || selected.size > 0;
   const endSelect = () => {
@@ -119,10 +128,10 @@ export function Library({ onDetail, onRead, notify }: Props) {
   return (
     <div className="view library">
       <header className="view-head">
-        {series !== null ? (
-          <button className="icon-btn" onClick={() => setSeries(null)} aria-label="Back to all series"><ChevronLeft /></button>
+        {!atTop ? (
+          <button className="icon-btn" onClick={() => setFolderPath(trail.slice(1, -1).map((n) => n.key))} aria-label="Back"><ChevronLeft /></button>
         ) : null}
-        <h1>{series ?? 'Library'}</h1>
+        <h1>{atTop ? 'Library' : here.name}</h1>
         <div className="search">
           <Search size={18} />
           <input placeholder="Search title, series, creator…" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -146,7 +155,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
         <EmptyLibrary onFiles={() => fileInput.current?.click()} onFolder={pickFolder} />
       ) : (
         <>
-          {series === null && !query && filter === 'all' && continueReading.length > 0 && (
+          {atTop && !query && filter === 'all' && continueReading.length > 0 && (
             <section className="shelf">
               <h2>Continue reading</h2>
               <div className="shelf-row">
@@ -169,7 +178,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
               <button className={`btn small${selecting ? ' on' : ''}`} onClick={() => (selecting ? endSelect() : setSelectMode(true))}>
                 {selecting ? 'Done' : 'Select'}
               </button>
-              {series === null && (
+              {atTop && (
                 <div className="segmented compact">
                   <button className={!grouped ? 'on' : ''} onClick={() => { setGrouped(false); localStorage.setItem('lib.grouped', '0'); }}>Issues</button>
                   <button className={grouped ? 'on' : ''} onClick={() => { setGrouped(true); localStorage.setItem('lib.grouped', '1'); }}>Series</button>
@@ -185,25 +194,44 @@ export function Library({ onDetail, onRead, notify }: Props) {
             </div>
           </div>
 
-          {grouped && series === null ? (
-            <div className="grid">
-              {seriesGroups.map((g) => (
-                <button key={g.name} className="card series-card" onClick={() => setSeries(g.name)}>
-                  <div className="card-cover stack">
-                    {g.items.slice(0, 3).reverse().map((c, i, arr) => (
-                      <Cover key={c.id} comic={c} className={`stack-${arr.length - 1 - i}`} />
-                    ))}
-                  </div>
-                  <div className="card-meta">
-                    <strong>{g.name}</strong>
-                    <span>{g.items.length} issue{g.items.length === 1 ? '' : 's'} · {g.read} read</span>
-                  </div>
-                </button>
+          {!atTop && trail.length > 2 && (
+            <nav className="crumbs lib-crumbs" aria-label="Folders">
+              <button onClick={() => setFolderPath([])}>Library</button>
+              {trail.slice(1, -1).map((n, i) => (
+                <span key={n.key} className="row">
+                  <ChevronRight size={14} />
+                  <button onClick={() => setFolderPath(trail.slice(1, i + 2).map((x) => x.key))}>{n.name}</button>
+                </span>
               ))}
-            </div>
-          ) : (
+            </nav>
+          )}
+          {grouped && here.folders.length > 0 && (
             <div className="grid">
-              {visible.map((c) => (
+              {here.folders.map((f) => {
+                const read = f.all.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
+                return (
+                  <button key={f.key} className="card series-card" onClick={() => setFolderPath([...trail.slice(1).map((n) => n.key), f.key])}>
+                    <div className="card-cover stack">
+                      {f.all.slice(0, 3).reverse().map((c, i, arr) => (
+                        <Cover key={c.id} comic={c} className={`stack-${arr.length - 1 - i}`} />
+                      ))}
+                    </div>
+                    <div className="card-meta">
+                      <strong>{f.name}</strong>
+                      <span>
+                        {f.folders.length > 0 && `${f.folders.length} volume${f.folders.length === 1 ? '' : 's'} · `}
+                        {f.all.length} issue{f.all.length === 1 ? '' : 's'} · {read} read
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {grouped && here.folders.length > 0 && shown.length > 0 && <div className="grid-gap" />}
+          {(!grouped || !atTop || here.folders.length === 0) && (
+            <div className="grid">
+              {shown.map((c) => (
                 <ComicCard
                   key={c.id}
                   comic={c}
@@ -223,7 +251,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
       {selecting && (
         <div className="selection-bar">
           <span><strong>{selected.size}</strong> selected</span>
-          <button className="btn small ghost" onClick={() => setSelected(new Set(visible.map((c) => c.id)))}>All</button>
+          <button className="btn small ghost" onClick={() => setSelected(new Set((grouped ? here.all : visible).map((c) => c.id)))}>All</button>
           <button className="btn small" onClick={() => setAdding(true)}><FolderPlus size={16} /> <span className="hide-mobile">Collection</span></button>
           <button className="btn small" title="Download for offline reading" onClick={() => { void downloadMany([...selected]); notify('Downloading for offline reading…'); endSelect(); }}>
             <CloudDownload size={16} /> <span className="hide-mobile">Download</span>
