@@ -451,3 +451,9 @@ label.btn { cursor: pointer; }
 .context-menu button:hover { background: var(--surface-2); }
 .toast-action { border: 0; background: transparent; color: var(--accent); font-weight: 800; padding: 2px 4px; }
 .rar-issues { margin-top: 8px; } .rar-issues ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); }
+
+/* comics whose Drive file was removed */
+.card.missing .cover img { filter: grayscale(0.85) brightness(0.6); }
+.badge-missing { position: absolute; bottom: 10px; right: 6px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--danger); color: #fff; }
+.missing-notice { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--text); }
+.missing-notice svg { color: var(--danger); flex-shrink: 0; }

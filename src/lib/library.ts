@@ -4,6 +4,11 @@ import { device, markDirty } from './syncState';
 
 export type Status = 'unread' | 'reading' | 'finished';
 
+/** Can be opened right now: downloaded here, or streamable from Drive. */
+export function isReadable(c: Comic) {
+  return !!c.hasFile || (!!c.driveFileId && !c.driveMissing);
+}
+
 export function statusOf(p?: Progress): Status {
   if (!p || (p.page === 0 && !p.finished)) return 'unread';
   return p.finished ? 'finished' : 'reading';

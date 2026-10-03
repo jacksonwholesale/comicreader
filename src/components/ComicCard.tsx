@@ -1,4 +1,4 @@
-import { Check, CloudDownload, Heart } from 'lucide-react';
+import { Check, CloudDownload, CloudOff, Heart } from 'lucide-react';
 import { useRef } from 'react';
 import type { Comic, Progress } from '../db';
 import { useBlobUrl } from '../lib/hooks';
@@ -35,7 +35,7 @@ export function ComicCard({ comic, progress, selected, selecting, onOpen, onSele
   const secondary = (x: number, y: number) => (onMenu && !selecting ? onMenu(x, y) : onSelect());
   return (
     <button
-      className={`card${selected ? ' selected' : ''}${!comic.hasFile ? ' remote' : ''}`}
+      className={`card${selected ? ' selected' : ''}${!comic.hasFile ? ' remote' : ''}${comic.driveMissing ? ' missing' : ''}`}
       onClick={() => {
         if (longPressed.current) return void (longPressed.current = false);
         selecting ? onSelect() : onOpen();
@@ -62,7 +62,13 @@ export function ComicCard({ comic, progress, selected, selecting, onOpen, onSele
         <Cover comic={comic} />
         {status === 'unread' && <span className="dot-new" aria-label="Unread" />}
         {status === 'finished' && <span className="badge-done"><Check size={14} /></span>}
-        {!comic.hasFile && <span className="badge-cloud" title="In Google Drive — not downloaded"><CloudDownload size={14} /></span>}
+        {comic.driveMissing ? (
+          <span className="badge-missing" title={comic.hasFile ? 'Removed from Google Drive (still downloaded here)' : 'Removed from Google Drive'}>
+            <CloudOff size={14} />
+          </span>
+        ) : (
+          !comic.hasFile && <span className="badge-cloud" title="In Google Drive — not downloaded"><CloudDownload size={14} /></span>
+        )}
         {comic.favorite ? <span className="badge-fav"><Heart size={12} fill="currentColor" /></span> : null}
         {status === 'reading' && (
           <div className="progress-bar">

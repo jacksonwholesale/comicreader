@@ -1,6 +1,6 @@
 import type { Collection, Comic, Progress } from '../db';
 import { buildTree } from './folders';
-import { sortComics, statusOf } from './library';
+import { isReadable, sortComics, statusOf } from './library';
 
 export interface UpNextItem {
   comic: Comic; // the immediate next issue
@@ -54,7 +54,7 @@ export function computeUpNext(comics: Comic[], progress: Map<string, Progress>, 
 
     const seq = sequence();
     const i = seq.findIndex((c) => c.id === after.id);
-    const next = seq.slice(i + 1).find((c) => statusOf(progress.get(c.id)) !== 'finished');
+    const next = seq.slice(i + 1).find((c) => statusOf(progress.get(c.id)) !== 'finished' && isReadable(c));
     if (!next || statusOf(progress.get(next.id)) === 'reading' || suggested.has(next.id)) continue;
     suggested.add(next.id);
     out.push({ comic: next, after, via });

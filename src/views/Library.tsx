@@ -4,7 +4,7 @@ import type { Comic } from '../db';
 import { ACCEPT, IMAGE_ACCEPT } from '../lib/archive';
 import { collectFromDirectory, fromFileList } from '../lib/importer';
 import { queueImport } from '../lib/importQueue';
-import { deleteComics, removeFromContinueReading, setFinished, sortComics, statusOf, type SortKey } from '../lib/library';
+import { deleteComics, isReadable, removeFromContinueReading, setFinished, sortComics, statusOf, type SortKey } from '../lib/library';
 import { useLibrary } from '../lib/useLibrary';
 import { buildTree, findPath } from '../lib/folders';
 import { computeUpNext } from '../lib/upNext';
@@ -14,7 +14,7 @@ import { AddToCollection } from '../components/AddToCollection';
 import { ContextMenu } from '../components/ContextMenu';
 import type { Notify } from '../App';
 
-type Filter = 'all' | 'unread' | 'reading' | 'finished' | 'favorites' | 'downloaded' | 'cloud';
+type Filter = 'all' | 'unread' | 'reading' | 'finished' | 'favorites' | 'downloaded' | 'cloud' | 'missing';
 
 interface Props {
   onDetail: (c: Comic) => void;
@@ -76,7 +76,9 @@ export function Library({ onDetail, onRead, notify }: Props) {
         case 'downloaded':
           return !!c.hasFile;
         case 'cloud':
-          return !c.hasFile;
+          return !c.hasFile && !c.driveMissing;
+        case 'missing':
+          return !!c.driveMissing;
       }
       return true;
     });
@@ -127,7 +129,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
   };
 
   // Downloaded comics open from the device; others stream from Drive.
-  const open = (c: Comic) => (c.hasFile || c.driveFileId ? onRead(c.id) : onDetail(c));
+  const open = (c: Comic) => (isReadable(c) ? onRead(c.id) : onDetail(c));
 
   if (loading) return <div className="center-fill"><div className="spinner" /></div>;
 
@@ -199,7 +201,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
 
           <div className="toolbar">
             <div className="chips">
-              {FILTERS.map(([f, label]) => (
+              {[...FILTERS, ...(all.some((c) => c.driveMissing) ? [['missing', 'Missing from Drive'] as [Filter, string]] : [])].map(([f, label]) => (
                 <button key={f} className={`chip${filter === f ? ' on' : ''}`} onClick={() => { setFilter(f); sessionStorage.setItem('lib.filter', f); }}>
                   {label}
                 </button>

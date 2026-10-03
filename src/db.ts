@@ -31,6 +31,7 @@ export interface Comic {
   favorite?: 0 | 1;
   driveFolderId?: string; // set for comics that come from a linked Drive folder
   drivePath?: string[]; // folder names between the linked folder and the file (drives the Series view)
+  driveMissing?: 0 | 1; // the file was removed from its Drive folder; kept until it comes back or you remove it
   driveModified?: string; // Drive modifiedTime, to notice replaced files
   infoRead?: 0 | 1; // ComicInfo/EPUB metadata already applied
   deleted?: 0 | 1; // tombstone for sync

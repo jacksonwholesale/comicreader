@@ -2,7 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { Monitor, Smartphone } from 'lucide-react';
 import { useMemo } from 'react';
 import { db } from '../db';
-import { computeStats, formatDuration, statusOf, timeAgo } from '../lib/library';
+import { computeStats, formatDuration, isReadable, statusOf, timeAgo } from '../lib/library';
 import { useLibrary } from '../lib/useLibrary';
 import { Cover } from '../components/ComicCard';
 
@@ -75,7 +75,7 @@ export function Stats({ onRead }: { onRead: (id: string) => void }) {
             return (
               <li key={s.id}>
                 {c ? <Cover comic={c} className="session-cover" /> : <div className="cover session-cover" />}
-                <button className="grow session-main" disabled={!c?.hasFile && !c?.driveFileId} onClick={() => c && onRead(c.id)}>
+                <button className="grow session-main" disabled={!c || !isReadable(c)} onClick={() => c && onRead(c.id)}>
                   <strong>{c?.title ?? 'Removed comic'}</strong>
                   <span className="muted small">
                     Pages {s.startPage + 1}–{s.endPage + 1} · {formatDuration(s.endedAt - s.startedAt)} · {s.deviceName}

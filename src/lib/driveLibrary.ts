@@ -134,12 +134,33 @@ export function scanLinkedFolders(force = false): Promise<void> {
         const seen = new Set<string>();
         const now = Date.now();
         const writes: Comic[] = [];
+        const adopted = new Set<string>();
         for (const f of files) {
           seen.add(f.id);
           const existing = byDriveId.get(f.id) ?? all.find((c) => c.id === `d_${f.id}`);
+          // A comic marked missing whose file is back under a new id (re-uploaded): reconnect it,
+          // keeping progress, bookmarks and collections.
+          if (!existing || existing.deleted) {
+            const back = all.find(
+              (c) => c.driveMissing && !c.deleted && !adopted.has(c.id) && c.driveFolderId === folder.id && c.fileName === f.name && samePath(c.drivePath, f.path),
+            );
+            if (back) {
+              adopted.add(back.id);
+              writes.push({ ...back, driveFileId: f.id, driveModified: f.modifiedTime, size: f.size ?? back.size, driveMissing: 0, updatedAt: now });
+              continue;
+            }
+          }
           // Uploaded from the app (lives under its own id): already in the library.
           if (existing && existing.id !== `d_${f.id}` && !existing.deleted) continue;
-          if (existing && !existing.deleted && existing.driveModified === f.modifiedTime && existing.fileName === f.name && samePath(existing.drivePath, f.path) && existing.driveFolderId === folder.id)
+          if (
+            existing &&
+            !existing.deleted &&
+            !existing.driveMissing &&
+            existing.driveModified === f.modifiedTime &&
+            existing.fileName === f.name &&
+            samePath(existing.drivePath, f.path) &&
+            existing.driveFolderId === folder.id
+          )
             continue;
           // You removed it from the library: stay removed unless the file in Drive changes.
           if (existing?.deleted && existing.driveModified === f.modifiedTime) continue;
@@ -164,17 +185,18 @@ export function scanLinkedFolders(force = false): Promise<void> {
             driveFolderId: folder.id,
             drivePath: f.path,
             driveModified: f.modifiedTime,
+            driveMissing: 0, // e.g. restored from Drive's trash
             deleted: 0,
             updatedAt: now,
           });
           if (replaced) await db.files.delete(`d_${f.id}`);
         }
-        // Files removed from the Drive folder leave the library (unless downloaded here).
-        const gone = all.filter((c) => c.driveFolderId === folder.id && c.id.startsWith('d_') && !c.deleted && !seen.has(c.driveFileId ?? ''));
-        for (const c of gone) {
-          if (c.hasFile) writes.push({ ...c, driveFileId: undefined, driveFolderId: undefined, updatedAt: now });
-          else writes.push({ ...c, deleted: 1, cover: undefined, coverTiny: undefined, updatedAt: now });
-        }
+        // Files removed from the Drive folder stay in the library, marked missing, until they come
+        // back (same name and folder) or you remove them. Downloaded copies stay readable.
+        const gone = all.filter(
+          (c) => c.driveFolderId === folder.id && !c.deleted && !c.driveMissing && c.driveFileId && !seen.has(c.driveFileId) && !adopted.has(c.id),
+        );
+        for (const c of gone) writes.push({ ...c, driveMissing: 1, updatedAt: now });
         if (writes.length) {
           await db.comics.bulkPut(writes);
           changed = true;
@@ -218,6 +240,7 @@ async function buildCovers() {
           !c.deleted &&
           !c.hasFile &&
           c.driveFileId &&
+          !c.driveMissing &&
           !c.cover &&
           // CBZ/EPUB/PDF: cheap (first page only), so every device makes its own sharp cover.
           // CBR/7z/TAR: only when no device has made one yet (the small cover then syncs).
@@ -273,7 +296,7 @@ async function buildRarIndexes() {
   indexing = true;
   try {
     const cbrs = (await db.comics.toArray())
-      .filter((c) => c.format === 'cbr' && !c.deleted && !c.hasFile && c.driveFileId && c.size)
+      .filter((c) => c.format === 'cbr' && !c.deleted && !c.hasFile && c.driveFileId && !c.driveMissing && c.size)
       .sort((a, b) => a.size - b.size);
     for (const c of cbrs) {
       if (!navigator.onLine) break;

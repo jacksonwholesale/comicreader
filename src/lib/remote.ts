@@ -132,6 +132,7 @@ export async function openForReading(
   const local = await db.files.get(comic.id);
   if (local) return openComic(local.blob, comic.fileName);
   if (!comic.driveFileId) throw new Error('This comic is not downloaded on this device and is not in Google Drive.');
+  if (comic.driveMissing) throw new Error("This comic's file was removed from your Google Drive folder. Put it back (same name, same folder) to read it again.");
   if (!navigator.onLine) throw new Error("You're offline, and this comic isn't downloaded. Download it while online to read it offline.");
   const size = comic.size;
   try {

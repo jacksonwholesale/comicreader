@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import type { Collection, Comic, SmartRule } from '../db';
 import { isConnected } from '../lib/drive';
 import { go } from '../lib/hooks';
-import { collectionMembers, createCollection, deleteCollection, removeFromCollection, statusOf, updateCollection } from '../lib/library';
+import { collectionMembers, isReadable, createCollection, deleteCollection, removeFromCollection, statusOf, updateCollection } from '../lib/library';
 import { downloadMany, processDriveQueue, removeDownloads } from '../lib/sync';
 import { useLibrary } from '../lib/useLibrary';
 import { ComicCard, Cover } from '../components/ComicCard';
@@ -107,7 +107,7 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
           {members.length > 0 && <div className="progress-bar inline"><i style={{ width: `${(read / members.length) * 100}%` }} /></div>}
         </div>
         <div className="row gap wrap">
-          {nextUp && (nextUp.hasFile || nextUp.driveFileId) && (
+          {nextUp && isReadable(nextUp) && (
             <button className="btn primary" onClick={() => onRead(nextUp.id)}><BookOpen size={18} /> {statusOf(progress.get(nextUp.id)) === 'reading' ? 'Continue' : 'Start'}: {nextUp.title}</button>
           )}
           {col.smart && <button className="btn" onClick={() => setEditRules((v) => !v)}><Sparkles size={18} /> Rules</button>}
@@ -148,7 +148,7 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
       {col.smart ? (
         <div className="grid">
           {members.map((c) => (
-            <ComicCard key={c.id} comic={c} progress={progress.get(c.id)} onOpen={() => (c.hasFile || c.driveFileId ? onRead(c.id) : onDetail(c))} onSelect={() => onDetail(c)} />
+            <ComicCard key={c.id} comic={c} progress={progress.get(c.id)} onOpen={() => (isReadable(c) ? onRead(c.id) : onDetail(c))} onSelect={() => onDetail(c)} />
           ))}
         </div>
       ) : (
@@ -158,7 +158,7 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
             return (
               <li key={c.id} className={st}>
                 <span className="rl-num">{i + 1}</span>
-                <button className="rl-main" onClick={() => (c.hasFile || c.driveFileId ? onRead(c.id) : onDetail(c))}>
+                <button className="rl-main" onClick={() => (isReadable(c) ? onRead(c.id) : onDetail(c))}>
                   <Cover comic={c} className="rl-cover" />
                   <span className="rl-text">
                     <strong>{c.title}</strong>

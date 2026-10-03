@@ -1,9 +1,9 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { BookOpen, CloudDownload, CloudUpload, FolderPlus, Heart, Pencil, Trash2, X, HardDriveDownload, RotateCcw, CheckCheck } from 'lucide-react';
+import { BookOpen, CloudDownload, CloudOff, CloudUpload, FolderPlus, Heart, Pencil, Trash2, X, HardDriveDownload, RotateCcw, CheckCheck } from 'lucide-react';
 import { useState } from 'react';
 import { db, type Comic } from '../db';
 import { isConnected } from '../lib/drive';
-import { deleteComics, formatBytes, formatDuration, percentOf, removeDownload, setFinished, statusOf, timeAgo, updateComic } from '../lib/library';
+import { deleteComics, formatBytes, isReadable, formatDuration, percentOf, removeDownload, setFinished, statusOf, timeAgo, updateComic } from '../lib/library';
 import { downloadFromDrive, uploadToDrive } from '../lib/sync';
 import { Cover } from './ComicCard';
 import { AddToCollection } from './AddToCollection';
@@ -52,19 +52,21 @@ export function ComicDetail({ comic, onClose, onRead, notify }: Props) {
               {status === 'unread' && <span className="pill">Unread</span>}
             </div>
             <div className="row gap wrap">
-              {comic.hasFile || comic.driveFileId ? (
+              {isReadable(comic) ? (
                 <>
                   <button className="btn primary" onClick={() => onRead(comic.id)}>
                     <BookOpen size={18} /> {status === 'reading' ? 'Continue' : status === 'finished' ? 'Read again' : 'Read'}
                   </button>
-                  {!comic.hasFile && (
+                  {!comic.hasFile && !comic.driveMissing && (
                     <button className="btn" disabled={!!transfer && !transfer.error} onClick={() => act(() => downloadFromDrive(comic.id), 'Downloaded — available offline')}>
                       <CloudDownload size={18} /> {transfer && !transfer.error ? `${Math.round(transfer.progress * 100)}%` : 'Download'}
                     </button>
                   )}
                 </>
               ) : (
-                <p className="muted small">This comic's file is on another device. Upload it to Drive from there (or add it to a Drive-synced collection) to read it here.</p>
+                !comic.driveMissing && (
+                  <p className="muted small">This comic's file is on another device. Upload it to Drive from there (or add it to a Drive-synced collection) to read it here.</p>
+                )
               )}
               <button className={`icon-btn${comic.favorite ? ' accent' : ''}`} aria-label="Favorite" onClick={() => void updateComic(comic.id, { favorite: comic.favorite ? 0 : 1 })}>
                 <Heart fill={comic.favorite ? 'currentColor' : 'none'} />
@@ -72,6 +74,20 @@ export function ComicDetail({ comic, onClose, onRead, notify }: Props) {
             </div>
           </div>
         </div>
+
+        {comic.driveMissing ? (
+          <div className="notice missing-notice">
+            <CloudOff size={20} />
+            <div>
+              <strong>Missing from Google Drive</strong>
+              <p className="small" style={{ margin: '4px 0 0' }}>
+                This file was removed from your Drive{comic.drivePath?.length ? <> folder <em>{comic.drivePath.join(' / ')}</em></> : ' folder'}. Put{' '}
+                <em>{comic.fileName}</em> back there (or restore it from Drive's trash) and it reconnects automatically with your progress.
+                {comic.hasFile ? ' The copy downloaded on this device still works.' : ''}
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         {comic.summary && <p className="summary">{comic.summary}</p>}
 
@@ -89,7 +105,7 @@ export function ComicDetail({ comic, onClose, onRead, notify }: Props) {
               {transfer && !transfer.error ? `Uploading ${Math.round(transfer.progress * 100)}%` : connected ? 'Upload to Google Drive' : 'Upload to Drive (connect in Settings)'}
             </button>
           )}
-          {comic.hasFile && comic.driveFileId ? (
+          {comic.hasFile && comic.driveFileId && !comic.driveMissing ? (
             <button onClick={() => act(() => removeDownload(comic.id), 'Removed from this device — still streams from Drive')}><HardDriveDownload size={18} /> Remove download (stays in Drive)</button>
           ) : null}
           <button
@@ -117,8 +133,8 @@ export function ComicDetail({ comic, onClose, onRead, notify }: Props) {
           <div>
             <dt>Storage</dt>
             <dd>
-              {comic.hasFile ? 'Downloaded on this device' : comic.driveFileId ? 'Streams from Google Drive' : 'Not on this device'}
-              {comic.driveFolderId ? ' · from your linked Drive folder' : comic.driveFileId ? ' · in Google Drive' : ''}
+              {comic.hasFile ? 'Downloaded on this device' : comic.driveMissing ? 'Not on this device' : comic.driveFileId ? 'Streams from Google Drive' : 'Not on this device'}
+              {comic.driveMissing ? ' · removed from Google Drive' : comic.driveFolderId ? ' · from your linked Drive folder' : comic.driveFileId ? ' · in Google Drive' : ''}
             </dd>
           </div>
           <div><dt>File</dt><dd className="ellipsis">{comic.fileName}</dd></div>
