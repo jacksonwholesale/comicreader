@@ -56,6 +56,21 @@ export async function setFinished(ids: string[], finished: boolean) {
   markDirty();
 }
 
+/**
+ * Takes a comic off "Continue reading" on every device by resetting its place to the start.
+ * Reading history (time/pages stats) is kept. Returns a function that undoes it.
+ */
+export async function removeFromContinueReading(comicId: string): Promise<() => Promise<void>> {
+  const prev = await db.progress.get(comicId);
+  const now = Date.now();
+  if (prev) await db.progress.put({ ...prev, page: 0, finished: 0, updatedAt: now, device: device.name });
+  markDirty();
+  return async () => {
+    if (prev) await db.progress.put({ ...prev, updatedAt: Date.now() });
+    markDirty();
+  };
+}
+
 export async function toggleBookmark(comicId: string, page: number) {
   const p = await db.progress.get(comicId);
   if (!p) return;

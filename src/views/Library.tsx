@@ -1,23 +1,25 @@
-import { CheckCheck, ChevronLeft, ChevronRight, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { BookOpen, CheckCheck, ChevronLeft, Info, ChevronRight, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import type { Comic } from '../db';
 import { ACCEPT, IMAGE_ACCEPT } from '../lib/archive';
 import { collectFromDirectory, fromFileList } from '../lib/importer';
 import { queueImport } from '../lib/importQueue';
-import { deleteComics, setFinished, sortComics, statusOf, type SortKey } from '../lib/library';
+import { deleteComics, removeFromContinueReading, setFinished, sortComics, statusOf, type SortKey } from '../lib/library';
 import { useLibrary } from '../lib/useLibrary';
 import { buildTree, findPath } from '../lib/folders';
 import { computeUpNext } from '../lib/upNext';
 import { downloadMany, removeDownloads } from '../lib/sync';
 import { ComicCard, Cover } from '../components/ComicCard';
 import { AddToCollection } from '../components/AddToCollection';
+import { ContextMenu } from '../components/ContextMenu';
+import type { Notify } from '../App';
 
 type Filter = 'all' | 'unread' | 'reading' | 'finished' | 'favorites' | 'downloaded' | 'cloud';
 
 interface Props {
   onDetail: (c: Comic) => void;
   onRead: (id: string) => void;
-  notify: (msg: string) => void;
+  notify: Notify;
 }
 
 const FILTERS: [Filter, string][] = [
@@ -54,6 +56,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
   const [selectMode, setSelectMode] = useState(false);
   const [adding, setAdding] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [menu2, setMenu2] = useState<{ x: number; y: number; comic: Comic } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
 
@@ -163,7 +166,14 @@ export function Library({ onDetail, onRead, notify }: Props) {
               <h2>Continue reading</h2>
               <div className="shelf-row">
                 {continueReading.map((c) => (
-                  <ComicCard key={c.id} comic={c} progress={progress.get(c.id)} onOpen={() => open(c)} onSelect={() => onDetail(c)} />
+                  <ComicCard
+                    key={c.id}
+                    comic={c}
+                    progress={progress.get(c.id)}
+                    onOpen={() => open(c)}
+                    onSelect={() => onDetail(c)}
+                    onMenu={(x, y) => setMenu2({ x, y, comic: c })}
+                  />
                 ))}
               </div>
             </section>
@@ -296,6 +306,26 @@ export function Library({ onDetail, onRead, notify }: Props) {
           </button>
           <button className="icon-btn" onClick={endSelect} aria-label="Cancel selection"><X /></button>
         </div>
+      )}
+      {menu2 && (
+        <ContextMenu
+          x={menu2.x}
+          y={menu2.y}
+          onClose={() => setMenu2(null)}
+          items={[
+            { label: 'Continue reading', icon: <BookOpen size={16} />, onClick: () => open(menu2.comic) },
+            { label: 'Details', icon: <Info size={16} />, onClick: () => onDetail(menu2.comic) },
+            {
+              label: 'Remove from Continue reading',
+              icon: <X size={16} />,
+              danger: true,
+              onClick: async () => {
+                const undo = await removeFromContinueReading(menu2.comic.id);
+                notify(`Removed "${menu2.comic.title}" from Continue reading`, { label: 'Undo', run: () => void undo() });
+              },
+            },
+          ]}
+        />
       )}
       {adding && <AddToCollection comicIds={[...selected]} onClose={() => { setAdding(false); endSelect(); }} notify={notify} />}
     </div>

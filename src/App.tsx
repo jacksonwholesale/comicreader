@@ -15,12 +15,18 @@ import { Library } from './views/Library';
 import { Settings } from './views/Settings';
 import { Stats } from './views/Stats';
 
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+export type Notify = (text: string, action?: ToastAction) => void;
+
 export function App() {
   const route = useRoute();
   const prefs = usePrefs();
   const systemDark = useMediaQuery('(prefers-color-scheme: dark)');
   const [detail, setDetail] = useState<Comic | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; action?: ToastAction; id: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
   const theme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
@@ -28,9 +34,10 @@ export function App() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
-  const notify = useCallback((m: string) => {
-    setToast(m);
-    window.setTimeout(() => setToast((t) => (t === m ? null : t)), 3500);
+  const notify = useCallback((text: string, action?: ToastAction) => {
+    const id = Date.now();
+    setToast({ text, action, id });
+    window.setTimeout(() => setToast((t) => (t?.id === id ? null : t)), action ? 6000 : 3500);
   }, []);
 
   const read = useCallback((id: string) => {
@@ -107,7 +114,22 @@ export function App() {
 
       {detail && <ComicDetail comic={detail} onClose={() => setDetail(null)} onRead={read} notify={notify} />}
       <Activity />
-      {toast && <div className="toast">{toast}</div>}
+      {toast && (
+        <div className="toast">
+          <span>{toast.text}</span>
+          {toast.action && (
+            <button
+              className="toast-action"
+              onClick={() => {
+                toast.action!.run();
+                setToast(null);
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
+        </div>
+      )}
       {dragging && (
         <div className="drop-overlay">
           <div>

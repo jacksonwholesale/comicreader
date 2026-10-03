@@ -444,3 +444,9 @@ label.btn { cursor: pointer; }
 @media (max-width: 760px) {
   .show-mobile { display: flex; }
 }
+
+/* context menu */
+.context-menu { position: fixed; z-index: 95; min-width: 220px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); animation: fade-in 0.1s; }
+.context-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0; background: transparent; border-radius: 8px; text-align: left; font-size: 14px; font-weight: 600; }
+.context-menu button:hover { background: var(--surface-2); }
+.toast-action { border: 0; background: transparent; color: var(--accent); font-weight: 800; padding: 2px 4px; }
