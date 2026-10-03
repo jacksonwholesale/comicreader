@@ -7,6 +7,7 @@ import { queueImport } from '../lib/importQueue';
 import { deleteComics, setFinished, sortComics, statusOf, type SortKey } from '../lib/library';
 import { useLibrary } from '../lib/useLibrary';
 import { buildTree, findPath } from '../lib/folders';
+import { computeUpNext } from '../lib/upNext';
 import { downloadMany, removeDownloads } from '../lib/sync';
 import { ComicCard, Cover } from '../components/ComicCard';
 import { AddToCollection } from '../components/AddToCollection';
@@ -30,7 +31,7 @@ const FILTERS: [Filter, string][] = [
 ];
 
 export function Library({ onDetail, onRead, notify }: Props) {
-  const { comics, progress, loading } = useLibrary();
+  const { comics, progress, collections, loading } = useLibrary();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>(() => (sessionStorage.getItem('lib.filter') as Filter) || 'all');
   const [sort, setSort] = useState<SortKey>(() => (localStorage.getItem('lib.sort') as SortKey) || 'series');
@@ -88,6 +89,8 @@ export function Library({ onDetail, onRead, notify }: Props) {
       ).slice(0, 12),
     [all, progress],
   );
+
+  const upNext = useMemo(() => computeUpNext(all, progress, collections), [all, progress, collections]);
 
   const tree = useMemo(() => buildTree(visible), [visible]);
   const trail = grouped ? findPath(tree, folderPath) : [tree];
@@ -160,6 +163,23 @@ export function Library({ onDetail, onRead, notify }: Props) {
               <h2>Continue reading</h2>
               <div className="shelf-row">
                 {continueReading.map((c) => (
+                  <ComicCard key={c.id} comic={c} progress={progress.get(c.id)} onOpen={() => open(c)} onSelect={() => onDetail(c)} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {atTop && !query && filter === 'all' && upNext && (
+            <section className="shelf">
+              <div className="shelf-head">
+                <h2>Up next</h2>
+                <span className="muted small">
+                  After {upNext.after.title}
+                  {upNext.via !== upNext.after.series ? ` · ${upNext.via}` : ''}
+                </span>
+              </div>
+              <div className="shelf-row">
+                {upNext.items.map((c) => (
                   <ComicCard key={c.id} comic={c} progress={progress.get(c.id)} onOpen={() => open(c)} onSelect={() => onDetail(c)} />
                 ))}
               </div>
