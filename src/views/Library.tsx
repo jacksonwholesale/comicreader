@@ -9,7 +9,8 @@ import { useLibrary } from '../lib/useLibrary';
 import { allGroups, buildTree, findPath, shownPaths, type FolderNode } from '../lib/folders';
 import { TextPrompt } from '../components/TextPrompt';
 import { MoveDialog } from '../components/MoveDialog';
-import { computeUpNext } from '../lib/upNext';
+import { computeUpNext, upNextKey } from '../lib/upNext';
+import { getPrefs, setPrefs, usePrefs } from '../lib/prefs';
 import { downloadMany, removeDownloads } from '../lib/sync';
 import { ComicCard, Cover } from '../components/ComicCard';
 import { AddToCollection } from '../components/AddToCollection';
@@ -109,7 +110,15 @@ export function Library({ onDetail, onRead, notify }: Props) {
     [all, progress],
   );
 
-  const upNext = useMemo(() => computeUpNext(all, progress, collections), [all, progress, collections]);
+  const prefs = usePrefs();
+  const upNext = useMemo(() => computeUpNext(all, progress, collections, prefs.upNextHidden), [all, progress, collections, prefs.upNextHidden]);
+  const [upNextMenu, setUpNextMenu] = useState<{ x: number; y: number; comic: Comic; after: Comic } | null>(null);
+  const hideUpNext = (after: Comic, comic: Comic) => {
+    const key = upNextKey(after.id, comic.id);
+    const before = getPrefs().upNextHidden;
+    setPrefs({ upNextHidden: [...before.filter((k) => k !== key), key].slice(-300) });
+    notify(`Removed "${comic.title}" from Up next`, { label: 'Undo', run: () => setPrefs({ upNextHidden: getPrefs().upNextHidden.filter((k) => k !== key) }) });
+  };
 
   const tree = useMemo(() => buildTree(visible), [visible]);
   // unfiltered, for renames/moves (so filtered-out comics move with their group)
@@ -247,6 +256,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
                     subtitle={`After ${after.title}${via !== after.series && via !== c.series ? ` · ${via}` : ''}`}
                     onOpen={() => open(c)}
                     onSelect={() => onDetail(c)}
+                    onMenu={(x, y) => setUpNextMenu({ x, y, comic: c, after })}
                   />
                 ))}
               </div>
@@ -363,6 +373,18 @@ export function Library({ onDetail, onRead, notify }: Props) {
           </button>
           <button className="icon-btn" onClick={endSelect} aria-label="Cancel selection"><X /></button>
         </div>
+      )}
+      {upNextMenu && (
+        <ContextMenu
+          x={upNextMenu.x}
+          y={upNextMenu.y}
+          onClose={() => setUpNextMenu(null)}
+          items={[
+            { label: 'Read', icon: <BookOpen size={16} />, onClick: () => open(upNextMenu.comic) },
+            { label: 'Details', icon: <Info size={16} />, onClick: () => onDetail(upNextMenu.comic) },
+            { label: 'Remove from Up next', icon: <X size={16} />, danger: true, onClick: () => hideUpNext(upNextMenu.after, upNextMenu.comic) },
+          ]}
+        />
       )}
       {groupMenu && (
         <ContextMenu

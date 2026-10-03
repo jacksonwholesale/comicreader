@@ -26,6 +26,7 @@ export interface Prefs {
   autoCrop: boolean; // trim scanner borders / white margins
   guidedShowFullPageFirst: boolean;
   theme: 'dark' | 'light' | 'system';
+  upNextHidden: string[]; // "afterId>nextId" suggestions you removed from Up next (synced with prefs)
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -47,6 +48,7 @@ export const DEFAULT_PREFS: Prefs = {
   autoCrop: false,
   guidedShowFullPageFirst: true,
   theme: 'dark',
+  upNextHidden: [],
 };
 
 const KEY = 'prefs.v1';

@@ -15,7 +15,16 @@ export interface UpNextItem {
  * leads into Vol. 2 #8), or (3) series + issue number. A series is left out when its next
  * issue is already in progress (it's in "Continue reading") or when you've finished it all.
  */
-export function computeUpNext(comics: Comic[], progress: Map<string, Progress>, collections: Collection[], limit = 12): UpNextItem[] {
+export const upNextKey = (afterId: string, nextId: string) => `${afterId}>${nextId}`;
+
+export function computeUpNext(
+  comics: Comic[],
+  progress: Map<string, Progress>,
+  collections: Collection[],
+  hidden: string[] = [],
+  limit = 12,
+): UpNextItem[] {
+  const hiddenSet = new Set(hidden);
   const finished = comics
     .filter((c) => progress.get(c.id)?.finished)
     .sort((a, b) => (progress.get(b.id)?.lastReadAt ?? 0) - (progress.get(a.id)?.lastReadAt ?? 0));
@@ -56,6 +65,8 @@ export function computeUpNext(comics: Comic[], progress: Map<string, Progress>, 
     const i = seq.findIndex((c) => c.id === after.id);
     const next = seq.slice(i + 1).find((c) => statusOf(progress.get(c.id)) !== 'finished' && isReadable(c));
     if (!next || statusOf(progress.get(next.id)) === 'reading' || suggested.has(next.id)) continue;
+    // you removed this suggestion; it comes back as a new one once you finish another issue here
+    if (hiddenSet.has(upNextKey(after.id, next.id))) continue;
     suggested.add(next.id);
     out.push({ comic: next, after, via });
     if (out.length >= limit) break;
