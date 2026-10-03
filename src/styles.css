@@ -432,3 +432,11 @@ label.btn { cursor: pointer; }
 .lib-crumbs { padding: 0 0 14px; }
 .shelf-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .shelf-head h2 { margin: 0; }
+
+/* reader zoom controls */
+.zoom-controls { display: flex; align-items: center; gap: 0; }
+.zoom-pct { min-width: 54px; height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.18); background: transparent; color: #fff; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.zoom-pct:hover { background: rgba(255, 255, 255, 0.1); }
+@media (max-width: 760px) {
+  .zoom-controls.at-fit { display: none; }
+}

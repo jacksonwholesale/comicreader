@@ -11,6 +11,8 @@ import {
   Rows3,
   Settings2,
   ArrowLeftRight,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from 'react';
 import { db, type Comic, type Direction, type ReadMode } from '../../db';
@@ -37,6 +39,10 @@ interface Props {
 
 type Zoom = { s: number; tx: number; ty: number; animate?: boolean };
 const NO_ZOOM: Zoom = { s: 1, tx: 0, ty: 0 };
+// 1 = your page-fit setting; you can zoom out below it (page centred) or in above it.
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 6;
+const isFit = (z: Zoom) => Math.abs(z.s - 1) < 0.01;
 type Leaving = { view: number[]; kind: 'turn' | 'fade'; forward: boolean; key: number };
 
 export function Reader({ comicId, onClose, onOpen }: Props) {
@@ -345,7 +351,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
     if (g.kind === 'pinch' && pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       const ratio = Math.hypot(a.x - b.x, a.y - b.y) / (g.dist || 1);
-      const s = clamp(g.z.s * ratio, 1, 6);
+      const s = clamp(g.z.s * ratio, MIN_ZOOM, MAX_ZOOM);
       const mx = (a.x + b.x) / 2;
       const my = (a.y + b.y) / 2;
       setZoom(clampZoom({ s, tx: mx - (g.mx - g.z.tx) * (s / g.z.s), ty: my - (g.my - g.z.ty) * (s / g.z.s) }, box));
@@ -370,7 +376,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
     if (g.kind === 'pinch') {
       if (pointers.current.size === 0) {
         gesture.current = null;
-        if (zoom.s < 1.05) setZoom({ ...NO_ZOOM, animate: true });
+        if (Math.abs(zoom.s - 1) < 0.06) setZoom({ ...NO_ZOOM, animate: true }); // snap back to fit when close
       }
       return;
     }
@@ -403,7 +409,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
     if (now - lastTap.current < 280 && mode !== 'scroll' && mode !== 'guided') {
       clearTimeout(tapTimer.current);
       lastTap.current = 0;
-      setZoom((z) => (z.s > 1.01 ? { ...NO_ZOOM, animate: true } : { ...zoomAt(z, 2.5, x, y, box), animate: true }));
+      setZoom((z) => (!isFit(z) ? { ...NO_ZOOM, animate: true } : { ...zoomAt(z, 2.5, x, y, box), animate: true }));
       return;
     }
     lastTap.current = now;
@@ -574,6 +580,19 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
               <strong>{comic.title}</strong>
               <span>{comic.series}{comic.number ? ` #${comic.number}` : ''}</span>
             </div>
+            {mode !== 'scroll' && mode !== 'guided' && (
+              <div className={`zoom-controls${isFit(zoom) ? ' at-fit' : ''}`}>
+                <button className="icon-btn hide-mobile" aria-label="Zoom out" title="Zoom out (−)" onClick={() => setZoom((z) => ({ ...zoomAt(z, 0.8, box.w / 2, box.h / 2, box), animate: true }))}>
+                  <ZoomOut />
+                </button>
+                <button className="zoom-pct" title="Back to page fit (0)" onClick={() => setZoom({ ...NO_ZOOM, animate: true })}>
+                  {isFit(zoom) ? 'Fit' : `${Math.round(zoom.s * 100)}%`}
+                </button>
+                <button className="icon-btn hide-mobile" aria-label="Zoom in" title="Zoom in (+)" onClick={() => setZoom((z) => ({ ...zoomAt(z, 1.25, box.w / 2, box.h / 2, box), animate: true }))}>
+                  <ZoomIn />
+                </button>
+              </div>
+            )}
             <button className="icon-btn" aria-label="Bookmark" onClick={() => void toggleBookmark(comicId, lastVisible)}>
               {bookmarked ? <BookmarkCheck className="accent" /> : <Bookmark />}
             </button>
@@ -698,11 +717,15 @@ function tapZone(x: number, y: number, w: number, h: number, zones: 'edges' | 'h
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 function clampZoom(z: Zoom, box: { w: number; h: number }): Zoom {
-  return { ...z, tx: clamp(z.tx, box.w - box.w * z.s, 0), ty: clamp(z.ty, box.h - box.h * z.s, 0), animate: false };
+  // Zoomed out: keep the page centred. Zoomed in: keep it covering the screen while panning.
+  const axis = (t: number, size: number) => (z.s <= 1 ? (size - size * z.s) / 2 : clamp(t, size - size * z.s, 0));
+  return { ...z, tx: axis(z.tx, box.w), ty: axis(z.ty, box.h), animate: false };
 }
 
 function zoomAt(z: Zoom, factor: number, x: number, y: number, box: { w: number; h: number }): Zoom {
-  const s = clamp(z.s * factor, 1, 6);
+  let s = clamp(z.s * factor, MIN_ZOOM, MAX_ZOOM);
+  // stepping across 100% lands exactly on the fit
+  if ((z.s < 1 && s > 1) || (z.s > 1 && s < 1) || Math.abs(s - 1) < 0.02) s = 1;
   if (s === 1) return NO_ZOOM;
   return clampZoom({ s, tx: x - (x - z.tx) * (s / z.s), ty: y - (y - z.ty) * (s / z.s) }, box);
 }
