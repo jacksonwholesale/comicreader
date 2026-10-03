@@ -1,5 +1,5 @@
 import { db, type Comic } from '../db';
-import { openComic, openPdfWith, sourceFromArchive, type ArchiveReader, type ComicSource } from './archive';
+import { firstImageFromRarHead, openComic, openPdfWith, sourceFromArchive, type ArchiveReader, type ComicSource } from './archive';
 import { downloadComic, fetchRange } from './drive';
 
 /**
@@ -133,4 +133,15 @@ export async function openForReading(comic: Comic, onProgress?: (fraction: numbe
 /** True when a format streams page-by-page (vs. being fetched whole each time it's opened). */
 export function streamsPageByPage(comic: Comic) {
   return comic.format === 'cbz' || comic.format === 'epub' || comic.format === 'pdf';
+}
+
+/** Cover of a CBR in Drive from its first few MB, without downloading the whole file. */
+export async function rarCoverFromDrive(comic: Comic): Promise<Blob | null> {
+  if (!comic.driveFileId || !comic.size) return null;
+  for (const mb of [4, 16]) {
+    const end = Math.min(comic.size, mb * 1024 * 1024) - 1;
+    const img = await firstImageFromRarHead(await fetchRange(comic.driveFileId, 0, end));
+    if (img || end >= comic.size - 1) return img;
+  }
+  return null;
 }

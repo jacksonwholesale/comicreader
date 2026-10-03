@@ -40,9 +40,29 @@ async function thumb(url: string, width: number, quality: number, asDataUrl = fa
 const TINY_COVER = 160;
 
 export async function makeCovers(src: ComicSource) {
-  const url = await src.pageUrl(0);
+  return coversFromUrl(await src.pageUrl(0));
+}
+
+async function coversFromUrl(url: string) {
   const [cover, coverTiny] = await Promise.all([thumb(url, 360, 0.82), thumb(url, TINY_COVER, 0.62, true)]);
   return { cover, coverTiny };
+}
+
+/** Covers from a single image (e.g. the first page pulled from the start of a big RAR in Drive). */
+export async function applyCoverImage(comicId: string, image: Blob) {
+  const url = URL.createObjectURL(image);
+  try {
+    const comic = await db.comics.get(comicId);
+    if (!comic) return;
+    const { cover, coverTiny } = await coversFromUrl(url);
+    if (comic.coverTiny) await db.comics.update(comicId, { cover });
+    else {
+      await db.comics.update(comicId, { cover, coverTiny, updatedAt: Date.now() });
+      markDirty();
+    }
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 /**

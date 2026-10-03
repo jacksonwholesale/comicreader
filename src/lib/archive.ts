@@ -247,6 +247,29 @@ async function unrarWasm() {
   return wasmPromise;
 }
 
+/**
+ * First image stored in a RAR, from just the beginning of the file. Comic RARs almost always
+ * store the cover first, so a few MB is enough even for a 400 MB collected edition.
+ * Returns null if that image doesn't fit in the bytes given.
+ */
+export async function firstImageFromRarHead(head: Uint8Array): Promise<Blob | null> {
+  const { createExtractorFromData } = await import('node-unrar-js');
+  const wasmBinary = await unrarWasm();
+  try {
+    const data = head.buffer.slice(head.byteOffset, head.byteOffset + head.byteLength) as ArrayBuffer;
+    const extractor = await createExtractorFromData({ wasmBinary, data });
+    (extractor as any).unrar.extractor = extractor;
+    const files = extractor.extract({ files: (h) => !h.flags.directory && IMAGE_RE.test(h.name) && !/(^|\/)(__MACOSX|\.)/.test(h.name) }).files;
+    for (const f of files) {
+      if (f.extraction) return new Blob([f.extraction as BlobPart], { type: mimeFor(f.fileHeader.name) });
+      break;
+    }
+  } catch {
+    /* ran past the end of the bytes we fetched */
+  }
+  return null;
+}
+
 async function openRar(blob: Blob): Promise<ComicSource> {
   const { createExtractorFromData } = await import('node-unrar-js');
   const data = await blob.arrayBuffer();

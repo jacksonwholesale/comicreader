@@ -2,8 +2,8 @@ import { useSyncExternalStore } from 'react';
 import { db, getKV, setKV, type Comic } from '../db';
 import { detectFormat, parseFileName } from './archive';
 import { FOLDER_MIME, hasFolderAccess, isConnected, listChildren, type DriveItem } from './drive';
-import { applySourceInfo } from './importer';
-import { openForReading, streamsPageByPage } from './remote';
+import { applyCoverImage, applySourceInfo } from './importer';
+import { openForReading, rarCoverFromDrive, streamsPageByPage } from './remote';
 import { markDirty } from './syncState';
 
 /**
@@ -209,14 +209,27 @@ async function buildCovers() {
         !c.hasFile &&
         c.driveFileId &&
         !c.cover &&
-        // RAR/7z/TAR must be downloaded whole; only do that once (the cover then syncs to other devices)
-        (streamsPageByPage(c) || (!c.coverTiny && c.size <= MAX_WHOLE_FILE)),
+        // CBR: cover from the first few MB. 7z/TAR must be downloaded whole; only do that once
+        // (the cover then syncs to other devices).
+        (streamsPageByPage(c) || c.format === 'cbr' || (!c.coverTiny && c.size <= MAX_WHOLE_FILE)),
     );
     setStatus({ covers: { done: 0, total: todo.length } });
     let done = 0;
     for (const c of todo) {
       if (!navigator.onLine) break;
       try {
+        if (c.format === 'cbr') {
+          const img = await rarCoverFromDrive(c);
+          if (img) {
+            await applyCoverImage(c.id, img);
+            setStatus({ covers: { done: ++done, total: todo.length } });
+            continue;
+          }
+          if (c.coverTiny || c.size > MAX_WHOLE_FILE) {
+            setStatus({ covers: { done: ++done, total: todo.length } });
+            continue;
+          }
+        }
         const src = await openForReading(c);
         try {
           await applySourceInfo(c.id, src);
