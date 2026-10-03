@@ -7,7 +7,7 @@ import { timeAgo } from '../lib/library';
 import { getRarIssues } from '../lib/remote';
 
 /** Settings section: Drive folders that make up the cloud library. */
-export function DriveFolders({ notify }: { notify: (m: string) => void }) {
+export function DriveFolders({ notify, onAuthError }: { notify: (m: string) => void; onAuthError: (e: unknown) => void }) {
   const [folders, setFolders] = useState<LinkedFolder[]>([]);
   const [access, setAccess] = useState(hasFolderAccess);
   const [picking, setPicking] = useState(false);
@@ -32,10 +32,7 @@ export function DriveFolders({ notify }: { notify: (m: string) => void }) {
           <button
             className="btn primary small"
             onClick={() =>
-              requestToken(true).then(
-                () => setAccess(hasFolderAccess()),
-                (e) => notify((e as Error).message),
-              )
+              requestToken(true).then(() => setAccess(hasFolderAccess()), onAuthError)
             }
           >
             Allow folder access

@@ -6,7 +6,8 @@ import { APP } from './config';
 import { go } from './lib/hooks';
 import { importFile } from './lib/importer';
 import { queueImport } from './lib/importQueue';
-import { startAutoSync } from './lib/sync';
+import { afterRedirectSignIn, startAutoSync } from './lib/sync';
+import { finishRedirectSignIn, prepareGoogle } from './lib/drive';
 import './styles.css';
 
 document.title = APP.name;
@@ -15,7 +16,14 @@ registerSW({ immediate: true });
 // Ask the browser not to evict the library under storage pressure.
 void navigator.storage?.persist?.();
 
+// Coming back from Google's sign-in page (backup sign-in for iPhone home-screen apps)?
+const redirect = finishRedirectSignIn();
+if (redirect.error) sessionStorage.setItem('auth.error', redirect.error);
+
 startAutoSync();
+if (redirect.done && !redirect.error) void afterRedirectSignIn();
+// Get Google sign-in ready early, so tapping Connect/Reconnect can open its window instantly.
+void prepareGoogle().catch(() => {});
 
 // The reader does its own zooming; stop iOS Safari from pinch-zooming the whole app instead.
 for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {

@@ -3,7 +3,7 @@ import { Cloud, CloudOff, Download, RefreshCw, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { APP } from '../config';
 import { db, getKV, setKV } from '../db';
-import { connectedEmail, getAccountEmail, getClientId, isConnected } from '../lib/drive';
+import { connectedEmail, getAccountEmail, getClientId, isConnected, isGoogleReady, prepareGoogle, PopupError, redirectUri, signInWithRedirect } from '../lib/drive';
 import { formatBytes, timeAgo } from '../lib/library';
 import { setPrefs, usePrefs } from '../lib/prefs';
 import { connectDrive, disconnectDrive, syncNow } from '../lib/sync';
@@ -18,11 +18,26 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
   const [clientId, setClientId] = useState('');
   const [email, setEmail] = useState<string | undefined>(connectedEmail);
   const [deviceName, setDeviceName] = useState(device.name);
+  const [googleReady, setGoogleReady] = useState(isGoogleReady);
+  const [popupFailed, setPopupFailed] = useState(false);
+  const authError = sessionStorage.getItem('auth.error');
+  // Sign-in failures: offer the backup (redirect) sign-in when the window was blocked.
+  const onAuthError = (e: unknown) => {
+    if (e instanceof PopupError || /open window|popup/i.test((e as Error)?.message ?? '')) setPopupFailed(true);
+    notify((e as Error).message);
+  };
   const [storage, setStorage] = useState<{ usage?: number; quota?: number }>({});
   const counts = useLiveQuery(async () => ({ comics: await db.comics.filter((c) => !c.deleted).count(), local: await db.comics.where('hasFile').equals(1).count() }), [], { comics: 0, local: 0 });
 
   useEffect(() => {
-    void getClientId().then(setClientId);
+    void getClientId().then((id) => {
+      setClientId(id);
+      if (id) prepareGoogle(id).then(setGoogleReady, () => {});
+    });
+    if (authError) {
+      notify(`Google sign-in: ${authError}`);
+      sessionStorage.removeItem('auth.error');
+    }
     void navigator.storage?.estimate?.().then((e) => setStorage({ usage: e.usage, quota: e.quota }));
   }, []);
   useEffect(() => {
@@ -49,7 +64,15 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
               <input
                 value={clientId}
                 placeholder="xxxxxxxx.apps.googleusercontent.com"
-                onChange={(e) => setClientId(e.target.value.trim())}
+                onChange={(e) => {
+                  const id = e.target.value.trim();
+                  setClientId(id);
+                  setGoogleReady(false);
+                  if (/.apps.googleusercontent.com$/.test(id)) {
+                    void setKV('googleClientId', id);
+                    prepareGoogle(id).then(setGoogleReady, () => {});
+                  }
+                }}
                 onBlur={() => void setKV('googleClientId', clientId)}
               />
             </label>
@@ -59,19 +82,17 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
             </p>
             <button
               className="btn primary"
-              disabled={!clientId}
-              onClick={async () => {
-                await setKV('googleClientId', clientId);
-                connectDrive().then(
-                  () => {
-                    setEmail(connectedEmail());
-                    notify(`Connected as ${connectedEmail() ?? 'your Google account'}`);
-                  },
-                  (e) => notify((e as Error).message),
-                );
+              disabled={!clientId || !googleReady}
+              onClick={() => {
+                // no waiting before connectDrive(): iPhone only allows the sign-in window straight from the tap
+                void setKV('googleClientId', clientId);
+                connectDrive().then(() => {
+                  setEmail(connectedEmail());
+                  notify(`Connected as ${connectedEmail() ?? 'your Google account'}`);
+                }, onAuthError);
               }}
             >
-              <Cloud size={18} /> Connect Google Drive
+              <Cloud size={18} /> {clientId && !googleReady ? 'Getting Google sign-in ready…' : 'Connect Google Drive'}
             </button>
           </>
         ) : (
@@ -89,7 +110,7 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
                 </span>
               </div>
               {status.state === 'error' && status.needsSignIn ? (
-                <button className="btn small primary" onClick={() => connectDrive().catch((e) => notify((e as Error).message))}>Reconnect</button>
+                <button className="btn small primary" onClick={() => void connectDrive().catch(onAuthError)}>Reconnect</button>
               ) : (
                 <button className="btn small" disabled={status.state === 'syncing'} onClick={() => void syncNow()}><RefreshCw size={16} /> Sync now</button>
               )}
@@ -105,7 +126,7 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
                       setEmail(connectedEmail());
                       notify(`Connected as ${connectedEmail() ?? 'new account'}`);
                     },
-                    (e) => notify((e as Error).message),
+                    onAuthError,
                   );
                 }}
               >
@@ -115,7 +136,7 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
                 <CloudOff size={16} /> Disconnect
               </button>
             </div>
-            <DriveFolders notify={notify} />
+            <DriveFolders notify={notify} onAuthError={onAuthError} />
           </>
         )}
         <label className="field">
@@ -131,6 +152,28 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
         </label>
         <p className="muted small">Shown in reading history and in “continue on…” prompts.</p>
       </section>
+
+      {popupFailed && (
+        <section className="panel notice-panel">
+          <h2>Google's sign-in window was blocked</h2>
+          <p className="small">
+            Some iPhone home-screen apps can't open Google's sign-in window. You can sign in on Google's own page instead, which returns you here afterwards.
+            First, a one-time step on your computer:
+          </p>
+          <ol className="small steps">
+            <li>Open <strong>console.cloud.google.com → APIs &amp; Services → Credentials</strong> and click your OAuth client.</li>
+            <li>Under <strong>Authorized redirect URIs</strong>, click <strong>Add URI</strong> and paste exactly:</li>
+          </ol>
+          <div className="row gap">
+            <code className="copy-box grow">{redirectUri()}</code>
+            <button className="btn small" onClick={() => void navigator.clipboard?.writeText(redirectUri()).then(() => notify('Copied'))}>Copy</button>
+          </div>
+          <p className="small">Click <strong>Save</strong>, wait a minute, then:</p>
+          <button className="btn primary" onClick={() => void signInWithRedirect().catch((e) => notify((e as Error).message))}>
+            Sign in on Google's page
+          </button>
+        </section>
+      )}
 
       <section className="panel">
         <h2>Appearance</h2>

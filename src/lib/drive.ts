@@ -70,38 +70,115 @@ export function hasValidToken() {
 
 let pending: Promise<string> | null = null;
 
-/** interactive=true must be called from a click handler so the popup is not blocked. */
+// The token client is created ahead of time so a tap on "Connect" can open Google's window
+// immediately. iPhone Safari only allows a window opened directly inside the tap — any waiting
+// first (loading Google's script) makes it fail with "Failed to open window".
+let tokenClient: any = null;
+let tokenClientFor = '';
+let waiting: { resolve: (t: string) => void; reject: (e: Error) => void } | null = null;
+
+function storeToken(access: string, expiresIn: number, scope: string) {
+  localStorage.setItem('drive.token', JSON.stringify({ access, expires: Date.now() + expiresIn * 1000 }));
+  localStorage.setItem('drive.scopes', scope);
+  localStorage.setItem('drive.connected', '1');
+}
+
+/** Load Google sign-in and set up the token client now, so the next tap can open it instantly. */
+export async function prepareGoogle(clientId?: string): Promise<boolean> {
+  const id = clientId ?? (await getClientId());
+  if (!id) return false;
+  await loadGis();
+  if (tokenClient && tokenClientFor === id) return true;
+  tokenClient = window.google.accounts.oauth2.initTokenClient({
+    client_id: id,
+    scope: SCOPES,
+    callback: (resp: any) => {
+      if (resp.error) return waiting?.reject(new Error(resp.error_description || resp.error));
+      storeToken(resp.access_token, Number(resp.expires_in), String(resp.scope ?? ''));
+      waiting?.resolve(resp.access_token);
+    },
+    error_callback: (err: any) =>
+      waiting?.reject(new PopupError(err?.type === 'popup_failed_to_open' ? 'Failed to open window' : err?.message || err?.type || 'Sign-in cancelled', err?.type)),
+  });
+  tokenClientFor = id;
+  return true;
+}
+
+export function isGoogleReady() {
+  return !!tokenClient;
+}
+
+export class PopupError extends Error {
+  constructor(
+    message: string,
+    public kind?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** interactive=true must be called straight from a tap, with no awaiting before it. */
 export function requestToken(interactive: boolean): Promise<string> {
   if (pending) return pending;
-  pending = (async () => {
-    const clientId = await getClientId();
-    if (!clientId) throw new Error('Add your Google OAuth Client ID in Settings first.');
-    await loadGis();
-    return new Promise<string>((resolve, reject) => {
-      const client = window.google.accounts.oauth2.initTokenClient({
-        client_id: clientId,
-        scope: SCOPES,
-        // Always show the account chooser when connecting, so a browser signed into several
-        // Google accounts never silently picks the wrong one. Background renewals are pinned
-        // to the account chosen then.
+  const ask = () =>
+    new Promise<string>((resolve, reject) => {
+      waiting = { resolve, reject };
+      // Always show the account chooser when connecting, so a browser signed into several
+      // Google accounts never silently picks the wrong one. Background renewals are pinned
+      // to the account chosen then.
+      tokenClient.requestAccessToken({
         prompt: interactive ? 'select_account consent' : '',
         login_hint: interactive ? undefined : connectedEmail(),
-        callback: (resp: any) => {
-          if (resp.error) return reject(new Error(resp.error_description || resp.error));
-          const token = { access: resp.access_token, expires: Date.now() + Number(resp.expires_in) * 1000 };
-          localStorage.setItem('drive.token', JSON.stringify(token));
-          localStorage.setItem('drive.scopes', String(resp.scope ?? ''));
-          localStorage.setItem('drive.connected', '1');
-          resolve(token.access);
-        },
-        error_callback: (err: any) => reject(new Error(err?.message || err?.type || 'Sign-in cancelled')),
+        hint: interactive ? undefined : connectedEmail(),
       });
-      client.requestAccessToken();
     });
-  })().finally(() => {
+  pending = (
+    tokenClient
+      ? ask() // ready: the window opens inside this tap
+      : prepareGoogle().then((ok) => {
+          if (!ok) throw new Error('Add your Google OAuth Client ID in Settings first.');
+          return ask();
+        })
+  ).finally(() => {
     pending = null;
+    waiting = null;
   });
   return pending;
+}
+
+/**
+ * Backup sign-in for when a pop-up can't open (some iPhone home-screen apps): go to Google's
+ * page and come back. Needs the app's address listed under "Authorized redirect URIs".
+ */
+export function redirectUri() {
+  return location.origin + location.pathname;
+}
+
+export async function signInWithRedirect() {
+  const clientId = await getClientId();
+  if (!clientId) throw new Error('Add your Google OAuth Client ID in Settings first.');
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri(),
+    response_type: 'token',
+    scope: SCOPES,
+    include_granted_scopes: 'true',
+    prompt: 'select_account consent',
+    state: 'cr-auth',
+  });
+  location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+}
+
+/** On startup: pick up the token Google sends back after a redirect sign-in. Returns an error message, if any. */
+export function finishRedirectSignIn(): { done: boolean; error?: string } {
+  const h = location.hash.replace(/^#/, '');
+  if (!/(^|&)(access_token|error)=/.test(h)) return { done: false };
+  const q = new URLSearchParams(h);
+  if (q.get('state') !== 'cr-auth') return { done: false };
+  history.replaceState(null, '', `${location.pathname}${location.search}#/settings`);
+  if (q.get('error')) return { done: true, error: q.get('error') === 'access_denied' ? 'Sign-in cancelled' : q.get('error')! };
+  storeToken(q.get('access_token')!, Number(q.get('expires_in') || 3600), q.get('scope') ?? '');
+  return { done: true };
 }
 
 /** True once the user has granted read access for linked folders (added after first release). */

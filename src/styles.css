@@ -459,3 +459,7 @@ label.btn { cursor: pointer; }
 .missing-notice svg { color: var(--danger); flex-shrink: 0; }
 .prompt-body { padding: 0 20px 8px; }
 .move-dialog > form { padding: 0 20px 8px; }
+
+.notice-panel { border-color: var(--accent); }
+.notice-panel .steps { padding-left: 20px; margin: 8px 0; }
+.copy-box { display: block; padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; user-select: all; }

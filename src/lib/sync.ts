@@ -263,6 +263,14 @@ export async function connectDrive() {
   await syncNow();
 }
 
+/** After returning from Google's sign-in page (redirect sign-in). */
+export async function afterRedirectSignIn() {
+  setStatus({ state: 'idle' });
+  await drive.getAccountEmail().catch(() => undefined);
+  markDirty();
+  await syncNow();
+}
+
 export function disconnectDrive() {
   drive.disconnect();
   setStatus({ state: 'off' });
