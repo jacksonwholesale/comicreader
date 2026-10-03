@@ -4,6 +4,16 @@ import { device, markDirty } from './syncState';
 
 export type Status = 'unread' | 'reading' | 'finished';
 
+/** Set (or clear, with undefined) where comics sit in the Series view. Syncs to every device. */
+export async function setShelves(updates: { id: string; shelf: string[] | undefined }[]) {
+  if (!updates.length) return;
+  const now = Date.now();
+  await db.transaction('rw', db.comics, async () => {
+    for (const u of updates) await db.comics.update(u.id, { shelf: u.shelf?.map((s) => s.trim()).filter(Boolean), updatedAt: now });
+  });
+  markDirty();
+}
+
 /** Can be opened right now: downloaded here, or streamable from Drive. */
 export function isReadable(c: Comic) {
   return !!c.hasFile || (!!c.driveFileId && !c.driveMissing);

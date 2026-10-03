@@ -1,12 +1,14 @@
-import { BookOpen, CheckCheck, ChevronLeft, Info, ChevronRight, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { BookOpen, CheckCheck, FolderInput, Pencil, ChevronLeft, Info, ChevronRight, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import type { Comic } from '../db';
 import { ACCEPT, IMAGE_ACCEPT } from '../lib/archive';
 import { collectFromDirectory, fromFileList } from '../lib/importer';
 import { queueImport } from '../lib/importQueue';
-import { deleteComics, isReadable, removeFromContinueReading, setFinished, sortComics, statusOf, type SortKey } from '../lib/library';
+import { deleteComics, isReadable, removeFromContinueReading, setFinished, setShelves, sortComics, statusOf, type SortKey } from '../lib/library';
 import { useLibrary } from '../lib/useLibrary';
-import { buildTree, findPath } from '../lib/folders';
+import { allGroups, buildTree, findPath, shownPaths, type FolderNode } from '../lib/folders';
+import { TextPrompt } from '../components/TextPrompt';
+import { MoveDialog } from '../components/MoveDialog';
 import { computeUpNext } from '../lib/upNext';
 import { downloadMany, removeDownloads } from '../lib/sync';
 import { ComicCard, Cover } from '../components/ComicCard';
@@ -98,6 +100,41 @@ export function Library({ onDetail, onRead, notify }: Props) {
   const upNext = useMemo(() => computeUpNext(all, progress, collections), [all, progress, collections]);
 
   const tree = useMemo(() => buildTree(visible), [visible]);
+  // unfiltered, for renames/moves (so filtered-out comics move with their group)
+  const fullTree = useMemo(() => buildTree(all), [all]);
+  const groupByKey = (key: string) => allGroups(fullTree).find((g) => g.key === key);
+  const [groupMenu, setGroupMenu] = useState<{ x: number; y: number; key: string } | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [moving, setMoving] = useState<{ group?: string; ids?: string[] } | null>(null);
+
+  const renameGroup = async (key: string, name: string) => {
+    const g = groupByKey(key);
+    if (!g) return;
+    const paths = shownPaths(fullTree);
+    const depth = g.path.length - 1;
+    await setShelves(g.all.map((c) => ({ id: c.id, shelf: paths.get(c.id)!.map((s, i) => (i === depth ? name : s)) })));
+    // stay inside the renamed group if we were in it
+    if (folderPath.includes(key)) {
+      const parentKey = key.slice(0, key.lastIndexOf('/'));
+      setFolderPath([...folderPath.slice(0, folderPath.indexOf(key)), `${parentKey}/${name}`]);
+    }
+    notify(`Renamed to "${name}"`);
+  };
+  const moveGroup = async (key: string, target: string[]) => {
+    const g = groupByKey(key);
+    if (!g) return;
+    const paths = shownPaths(fullTree);
+    await setShelves(g.all.map((c) => ({ id: c.id, shelf: [...target, ...paths.get(c.id)!.slice(g.path.length - 1)] })));
+    setFolderPath([]);
+    notify(target.length ? `Moved "${g.name}" into "${target[target.length - 1]}"` : `Moved "${g.name}" to the top`);
+  };
+  const resetGroup = async (key: string) => {
+    const g = groupByKey(key);
+    if (!g) return;
+    await setShelves(g.all.map((c) => ({ id: c.id, shelf: undefined })));
+    setFolderPath([]);
+    notify(`"${g.name}" is back to your Drive folder layout`);
+  };
   const trail = grouped ? findPath(tree, folderPath) : [tree];
   const here = trail[trail.length - 1];
   const atTop = trail.length === 1;
@@ -140,6 +177,11 @@ export function Library({ onDetail, onRead, notify }: Props) {
           <button className="icon-btn" onClick={() => setFolderPath(trail.slice(1, -1).map((n) => n.key))} aria-label="Back"><ChevronLeft /></button>
         ) : null}
         <h1>{atTop ? 'Library' : here.name}</h1>
+        {!atTop && grouped && (
+          <button className="icon-btn" aria-label="Rename group" title="Rename group" onClick={() => setRenaming(here.key)}>
+            <Pencil size={18} />
+          </button>
+        )}
         <div className="search">
           <Search size={18} />
           <input placeholder="Search title, series, creator…" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -243,20 +285,13 @@ export function Library({ onDetail, onRead, notify }: Props) {
               {here.folders.map((f) => {
                 const read = f.all.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
                 return (
-                  <button key={f.key} className="card series-card" onClick={() => setFolderPath([...trail.slice(1).map((n) => n.key), f.key])}>
-                    <div className="card-cover stack">
-                      {f.all.slice(0, 3).reverse().map((c, i, arr) => (
-                        <Cover key={c.id} comic={c} className={`stack-${arr.length - 1 - i}`} />
-                      ))}
-                    </div>
-                    <div className="card-meta">
-                      <strong>{f.name}</strong>
-                      <span>
-                        {f.folders.length > 0 && `${f.folders.length} volume${f.folders.length === 1 ? '' : 's'} · `}
-                        {f.all.length} issue{f.all.length === 1 ? '' : 's'} · {read} read
-                      </span>
-                    </div>
-                  </button>
+                  <GroupCard
+                    key={f.key}
+                    group={f}
+                    read={read}
+                    onOpen={() => setFolderPath([...trail.slice(1).map((n) => n.key), f.key])}
+                    onMenu={(x, y) => setGroupMenu({ x, y, key: f.key })}
+                  />
                 );
               })}
             </div>
@@ -289,6 +324,9 @@ export function Library({ onDetail, onRead, notify }: Props) {
           <button className="btn small" title="Download for offline reading" onClick={() => { void downloadMany([...selected]); notify('Downloading for offline reading…'); endSelect(); }}>
             <CloudDownload size={16} /> <span className="hide-mobile">Download</span>
           </button>
+          <button className="btn small" title="Move to a group in the Series view" onClick={() => setMoving({ ids: [...selected] })}>
+            <FolderInput size={16} /> <span className="hide-mobile">Move</span>
+          </button>
           <button
             className="btn small"
             title="Remove downloads (stay in Drive)"
@@ -308,6 +346,47 @@ export function Library({ onDetail, onRead, notify }: Props) {
           </button>
           <button className="icon-btn" onClick={endSelect} aria-label="Cancel selection"><X /></button>
         </div>
+      )}
+      {groupMenu && (
+        <ContextMenu
+          x={groupMenu.x}
+          y={groupMenu.y}
+          onClose={() => setGroupMenu(null)}
+          items={[
+            { label: 'Rename', icon: <Pencil size={16} />, onClick: () => setRenaming(groupMenu.key) },
+            { label: 'Move into…', icon: <FolderInput size={16} />, onClick: () => setMoving({ group: groupMenu.key }) },
+            ...(groupByKey(groupMenu.key)?.custom
+              ? [{ label: "Use Drive's layout", icon: <RotateCcw size={16} />, onClick: () => void resetGroup(groupMenu.key) }]
+              : []),
+          ]}
+        />
+      )}
+      {renaming && (
+        <TextPrompt
+          title="Rename group"
+          initial={groupByKey(renaming)?.name ?? ''}
+          hint="Only changes how it shows here — your Drive folders stay as they are. Use the same name as another group to merge them."
+          confirm="Rename"
+          onSubmit={(name) => void renameGroup(renaming, name)}
+          onClose={() => setRenaming(null)}
+        />
+      )}
+      {moving && (
+        <MoveDialog
+          title={moving.group ? `Move "${groupByKey(moving.group)?.name}" into…` : `Move ${moving.ids!.length} comic${moving.ids!.length === 1 ? '' : 's'} to…`}
+          tree={fullTree}
+          excludeKey={moving.group}
+          allowTop={!!moving.group}
+          onPick={(path) => {
+            if (moving.group) void moveGroup(moving.group, path);
+            else
+              void setShelves(moving.ids!.map((id) => ({ id, shelf: path }))).then(() => {
+                notify(`Moved to "${path[path.length - 1]}"`);
+                endSelect();
+              });
+          }}
+          onClose={() => setMoving(null)}
+        />
       )}
       {menu2 && (
         <ContextMenu
@@ -346,5 +425,49 @@ function EmptyLibrary({ onFiles, onFolder }: { onFiles: () => void; onFolder: ()
       </div>
       <p className="muted small">CBZ · CBR · CB7 · CBT · PDF · EPUB · ZIP/RAR/7z/TAR · folders of JPG/PNG/WebP/AVIF images</p>
     </div>
+  );
+}
+
+/** A stacked-covers card for a group in the Series view; right-click / long-press for its menu. */
+function GroupCard({ group: f, read, onOpen, onMenu }: { group: FolderNode; read: number; onOpen: () => void; onMenu: (x: number, y: number) => void }) {
+  const timer = useRef<number>(undefined);
+  const longPressed = useRef(false);
+  return (
+    <button
+      className="card series-card"
+      onClick={() => {
+        if (longPressed.current) longPressed.current = false;
+        else onOpen();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (!longPressed.current) onMenu(e.clientX, e.clientY);
+      }}
+      onPointerDown={(e) => {
+        longPressed.current = false;
+        if (e.pointerType !== 'touch') return;
+        const { clientX, clientY } = e;
+        timer.current = window.setTimeout(() => {
+          longPressed.current = true;
+          onMenu(clientX, clientY);
+        }, 450);
+      }}
+      onPointerUp={() => clearTimeout(timer.current)}
+      onPointerLeave={() => clearTimeout(timer.current)}
+      onPointerCancel={() => clearTimeout(timer.current)}
+    >
+      <div className="card-cover stack">
+        {f.all.slice(0, 3).reverse().map((c, i, arr) => (
+          <Cover key={c.id} comic={c} className={`stack-${arr.length - 1 - i}`} />
+        ))}
+      </div>
+      <div className="card-meta">
+        <strong>{f.name}</strong>
+        <span>
+          {f.folders.length > 0 && `${f.folders.length} volume${f.folders.length === 1 ? '' : 's'} · `}
+          {f.all.length} issue{f.all.length === 1 ? '' : 's'} · {read} read
+        </span>
+      </div>
+    </button>
   );
 }

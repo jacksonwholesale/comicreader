@@ -170,6 +170,7 @@ function EditForm({ comic, onDone }: { comic: Comic; onDone: () => void }) {
         e.preventDefault();
         void updateComic(comic.id, {
           ...f,
+          infoRead: 1, // your edits win over file metadata read later
           number: f.number || undefined,
           volume: f.volume || undefined,
           year: Number(f.year) || undefined,

@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, BookOpen, ChevronLeft, Cloud, CloudDownload, CloudOff, HardDriveDownload, FolderPlus, Sparkles, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, BookOpen, FolderOpen, Pencil, ChevronLeft, Cloud, CloudDownload, CloudOff, HardDriveDownload, FolderPlus, Sparkles, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { Collection, Comic, SmartRule } from '../db';
 import { isConnected } from '../lib/drive';
@@ -8,14 +8,18 @@ import { downloadMany, processDriveQueue, removeDownloads } from '../lib/sync';
 import { useLibrary } from '../lib/useLibrary';
 import { ComicCard, Cover } from '../components/ComicCard';
 import { Toggle } from '../components/reader/ReaderSettings';
+import { TextPrompt } from '../components/TextPrompt';
+import { ContextMenu } from '../components/ContextMenu';
+import { Pressable } from '../components/Pressable';
 
 export function Collections() {
   const { comics, progress, collections } = useLibrary();
   const all = comics ?? [];
   const sorted = [...collections].sort((a, b) => a.name.localeCompare(b.name));
-  const make = async (smart: boolean) => {
-    const name = prompt(smart ? 'Name for the smart collection' : 'Name for the new collection');
-    if (!name) return;
+  const [creating, setCreating] = useState<'manual' | 'smart' | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; col: Collection } | null>(null);
+  const [renaming, setRenaming] = useState<Collection | null>(null);
+  const make = async (name: string, smart: boolean) => {
     const id = await createCollection(name, smart ? { smart: { status: 'any' } } : {});
     go(`collection/${id}`);
   };
@@ -24,8 +28,8 @@ export function Collections() {
       <header className="view-head">
         <h1>Collections</h1>
         <div className="row gap">
-          <button className="btn" onClick={() => void make(true)}><Sparkles size={18} /><span className="hide-mobile">Smart collection</span></button>
-          <button className="btn primary" onClick={() => void make(false)}><FolderPlus size={18} /><span className="hide-mobile">New collection</span></button>
+          <button className="btn" onClick={() => setCreating('smart')}><Sparkles size={18} /><span className="hide-mobile">Smart collection</span></button>
+          <button className="btn primary" onClick={() => setCreating('manual')}><FolderPlus size={18} /><span className="hide-mobile">New collection</span></button>
         </div>
       </header>
       {!sorted.length ? (
@@ -43,7 +47,7 @@ export function Collections() {
             const members = collectionMembers(col, all, progress);
             const read = members.filter((c) => statusOf(progress.get(c.id)) === 'finished').length;
             return (
-              <button key={col.id} className="card collection-card" onClick={() => go(`collection/${col.id}`)}>
+              <Pressable key={col.id} className="card collection-card" onOpen={() => go(`collection/${col.id}`)} onMenu={(x, y) => setMenu({ x, y, col })}>
                 <div className="mosaic">
                   {members.slice(0, 4).map((c) => <Cover key={c.id} comic={c} />)}
                   {!members.length && <div className="cover-blank">{col.name.slice(0, 1)}</div>}
@@ -54,10 +58,40 @@ export function Collections() {
                   </strong>
                   <span>{members.length} comics · {read} read</span>
                 </div>
-              </button>
+              </Pressable>
             );
           })}
         </div>
+      )}
+      {creating && (
+        <TextPrompt
+          title={creating === 'smart' ? 'New smart collection' : 'New collection'}
+          confirm="Create"
+          onSubmit={(name) => void make(name, creating === 'smart')}
+          onClose={() => setCreating(null)}
+        />
+      )}
+      {renaming && (
+        <TextPrompt title="Rename collection" initial={renaming.name} confirm="Rename" onSubmit={(name) => void updateCollection(renaming.id, { name })} onClose={() => setRenaming(null)} />
+      )}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: 'Open', icon: <FolderOpen size={16} />, onClick: () => go(`collection/${menu.col.id}`) },
+            { label: 'Rename', icon: <Pencil size={16} />, onClick: () => setRenaming(menu.col) },
+            {
+              label: 'Delete collection',
+              icon: <Trash2 size={16} />,
+              danger: true,
+              onClick: () => {
+                if (confirm(`Delete the collection "${menu.col.name}"? The comics stay in your library.`)) void deleteCollection(menu.col.id);
+              },
+            },
+          ]}
+        />
       )}
     </div>
   );
@@ -69,6 +103,7 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
   const all = comics ?? [];
   const members = useMemo(() => (col ? collectionMembers(col, all, progress) : []), [col, all, progress]);
   const [editRules, setEditRules] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   if (!col) return <div className="view"><p className="muted pad">Collection not found.</p></div>;
 
@@ -87,10 +122,11 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
     <div className="view">
       <header className="view-head">
         <button className="icon-btn" onClick={() => go('collections')} aria-label="Back"><ChevronLeft /></button>
-        <h1 className="editable" contentEditable suppressContentEditableWarning onBlur={(e) => {
-          const name = e.currentTarget.textContent?.trim();
-          if (name && name !== col.name) void updateCollection(col.id, { name });
-        }}>{col.name}</h1>
+        <h1>{col.name}</h1>
+        <button className="icon-btn" aria-label="Rename collection" title="Rename" onClick={() => setRenaming(true)}>
+          <Pencil size={18} />
+        </button>
+        <span className="grow" />
         <button
           className="icon-btn danger"
           aria-label="Delete collection"
@@ -178,6 +214,9 @@ export function CollectionDetail({ id, onRead, onDetail }: { id: string; onRead:
           })}
           {!members.length && <p className="muted pad">Add comics from the Library: tap Select, choose some, then "Collection".</p>}
         </ol>
+      )}
+      {renaming && (
+        <TextPrompt title="Rename collection" initial={col.name} confirm="Rename" onSubmit={(name) => void updateCollection(col.id, { name })} onClose={() => setRenaming(false)} />
       )}
     </div>
   );
