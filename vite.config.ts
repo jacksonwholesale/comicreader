@@ -5,6 +5,8 @@ import { APP } from './src/config';
 
 export default defineConfig({
   base: './',
+  // shown in Settings so you can tell which version a device is running
+  define: { __BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC') },
   plugins: [
     react(),
     VitePWA({

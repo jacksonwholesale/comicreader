@@ -507,6 +507,26 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
   };
   const filter = prefs.brightness !== 100 ? `brightness(${prefs.brightness / 100})` : undefined;
 
+  // − Fit/% + (top bar on desktop, bottom bar on phones); scroll mode zooms page width instead
+  const zoomLevel = mode === 'scroll' ? scrollZoom : zoom.s;
+  const atFit = Math.abs(zoomLevel - 1) < 0.01;
+  const zoomStep = (f: number) =>
+    mode === 'scroll' ? setScrollZoom((z) => stepScrollZoom(z, f)) : setZoom((z) => ({ ...zoomAt(z, f, box.w / 2, box.h / 2, box), animate: true }));
+  const zoomUi =
+    mode === 'guided' ? null : (
+      <div className="zoom-controls">
+        <button className="icon-btn" aria-label="Zoom out" title="Zoom out (−)" onClick={() => zoomStep(0.8)}>
+          <ZoomOut />
+        </button>
+        <button className="zoom-pct" title="Back to page fit (0)" onClick={() => (mode === 'scroll' ? setScrollZoom(1) : setZoom({ ...NO_ZOOM, animate: true }))}>
+          {atFit ? 'Fit' : `${Math.round(zoomLevel * 100)}%`}
+        </button>
+        <button className="icon-btn" aria-label="Zoom in" title="Zoom in (+)" onClick={() => zoomStep(1.25)}>
+          <ZoomIn />
+        </button>
+      </div>
+    );
+
   return (
     <div className={`reader bg-${prefs.background}`}>
       {mode === 'scroll' ? (
@@ -592,25 +612,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
               <strong>{comic.title}</strong>
               <span>{comic.series}{comic.number ? ` #${comic.number}` : ''}</span>
             </div>
-            {mode !== 'guided' && (() => {
-              const level = mode === 'scroll' ? scrollZoom : zoom.s;
-              const fit = Math.abs(level - 1) < 0.01;
-              const step = (f: number) =>
-                mode === 'scroll' ? setScrollZoom((z) => stepScrollZoom(z, f)) : setZoom((z) => ({ ...zoomAt(z, f, box.w / 2, box.h / 2, box), animate: true }));
-              return (
-                <div className={`zoom-controls${fit ? ' at-fit' : ''}`}>
-                  <button className="icon-btn hide-mobile" aria-label="Zoom out" title="Zoom out (−)" onClick={() => step(0.8)}>
-                    <ZoomOut />
-                  </button>
-                  <button className="zoom-pct" title="Back to page fit (0)" onClick={() => (mode === 'scroll' ? setScrollZoom(1) : setZoom({ ...NO_ZOOM, animate: true }))}>
-                    {fit ? 'Fit' : `${Math.round(level * 100)}%`}
-                  </button>
-                  <button className="icon-btn hide-mobile" aria-label="Zoom in" title="Zoom in (+)" onClick={() => step(1.25)}>
-                    <ZoomIn />
-                  </button>
-                </div>
-              );
-            })()}
+            <div className="hide-mobile">{zoomUi}</div>
             <button className="icon-btn" aria-label="Bookmark" onClick={() => void toggleBookmark(comicId, lastVisible)}>
               {bookmarked ? <BookmarkCheck className="accent" /> : <Bookmark />}
             </button>
@@ -619,6 +621,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
             <button className="icon-btn hide-mobile" aria-label="Fullscreen" onClick={toggleFullscreen}><Maximize /></button>
           </header>
           <footer className="reader-bottom">
+            {zoomUi && <div className="show-mobile zoom-row">{zoomUi}</div>}
             <div className="scrubber" dir={direction}>
               <span>{lastVisible + 1}</span>
               <input

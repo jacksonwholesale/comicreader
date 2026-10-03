@@ -182,7 +182,7 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
           <div><dt>Esc</dt><dd>Close reader</dd></div>
         </dl>
       </section>
-      <p className="muted small center pad">{APP.name}</p>
+      <p className="muted small center pad">{APP.name} · version {__BUILD__}</p>
     </div>
   );
 }

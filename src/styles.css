@@ -438,6 +438,9 @@ label.btn { cursor: pointer; }
 .zoom-controls { display: flex; align-items: center; gap: 0; }
 .zoom-pct { min-width: 54px; height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.18); background: transparent; color: #fff; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .zoom-pct:hover { background: rgba(255, 255, 255, 0.1); }
+.show-mobile { display: none; }
+.zoom-row { justify-content: center; margin-bottom: 6px; }
+.zoom-row .zoom-controls { gap: 6px; }
 @media (max-width: 760px) {
-  .zoom-controls.at-fit { display: none; }
+  .show-mobile { display: flex; }
 }

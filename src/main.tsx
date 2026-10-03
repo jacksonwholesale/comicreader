@@ -17,6 +17,11 @@ void navigator.storage?.persist?.();
 
 startAutoSync();
 
+// The reader does its own zooming; stop iOS Safari from pinch-zooming the whole app instead.
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
+
 // Desktop "Open with…" for the installed app (manifest file_handlers).
 if ('launchQueue' in window) {
   (window as any).launchQueue.setConsumer(async (params: { files: FileSystemFileHandle[] }) => {
