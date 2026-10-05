@@ -479,3 +479,5 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .card { -webkit-touch-callout: none; touch-action: manipulation; }
 
 .stay-ok { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+
+.page-failed { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: #aab; font-size: 14px; }

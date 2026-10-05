@@ -339,7 +339,14 @@ export async function openPdfWith(params: (pdfjs: PdfJs) => object): Promise<Com
   const { default: workerUrl } = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
   // wasmUrl: JPEG 2000 / JBIG2 decoders (copied to public/pdfjs by scripts/copy-pdf-decoders.mjs)
-  const task = pdfjs.getDocument({ wasmUrl: new URL('pdfjs/wasm/', document.baseURI).href, ...params(pdfjs) });
+  const task = pdfjs.getDocument({
+    wasmUrl: new URL('pdfjs/wasm/', document.baseURI).href,
+    // iPhone Safari: drawing images inside the worker (OffscreenCanvas) and the browser's ImageDecoder
+    // can hang or come out blank; the plain paths work everywhere and are only slightly slower.
+    isOffscreenCanvasSupported: false,
+    isImageDecoderSupported: false,
+    ...params(pdfjs),
+  });
   const doc = await task.promise;
   // Phones (iPhone especially) have a small budget for canvas memory: render a bit smaller there,
   // one page at a time, and free each canvas as soon as its image is made.

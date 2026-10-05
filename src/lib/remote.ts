@@ -137,7 +137,22 @@ export async function openForReading(
   const size = comic.size;
   try {
     if (size && (comic.format === 'cbz' || comic.format === 'epub')) return await sourceFromArchive(await openRemoteZip(comic.driveFileId, size));
-    if (size && comic.format === 'pdf') return await openRemotePdf(comic.driveFileId, size);
+    if (size && comic.format === 'pdf') {
+      // Piece-by-piece streaming; if it stalls (seen on iPhone), fall back to downloading the whole file.
+      try {
+        const src = await withTimeout(openRemotePdf(comic.driveFileId, size), 20_000);
+        try {
+          await withTimeout(src.pageUrl(0), 25_000);
+          return src;
+        } catch (e) {
+          src.close();
+          throw e;
+        }
+      } catch {
+        onStatus?.('Loading from Google Drive…');
+        // fall through to the whole-file download below
+      }
+    }
     if (size && comic.format === 'cbr') {
       try {
         const src = await openRemoteRar(comic, onStatus);
@@ -203,4 +218,8 @@ function noteRarIssue(comic: Comic, e: unknown) {
   try {
     localStorage.setItem('rar.issues', JSON.stringify(issues));
   } catch {}
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timed out')), ms))]);
 }

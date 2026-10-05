@@ -58,6 +58,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
   const [ui, setUi] = useState(false);
   const [panel, setPanel] = useState<'none' | 'settings' | 'pages'>('none');
   const [urls, setUrls] = useState<Map<number, string>>(new Map());
+  const [failed, setFailed] = useState<Set<number>>(new Set()); // pages that couldn't be drawn
   const [dims, setDims] = useState<Map<number, Dims>>(new Map());
   const [crops, setCrops] = useState<Map<number, Rect | null>>(new Map());
   const [zoom, setZoom] = useState<Zoom>(NO_ZOOM);
@@ -141,7 +142,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
       source.pageUrl(p).then((u) => {
         setUrls((m) => (m.has(p) ? m : new Map(m).set(p, u)));
         if (prefs.autoCrop && !crops.has(p)) contentBox(u).then((r) => setCrops((m) => new Map(m).set(p, r)), () => {});
-      }, () => {});
+      }, () => setFailed((f) => new Set(f).add(p)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, vi, views, mode, prefs.autoCrop]);
@@ -490,6 +491,7 @@ export function Reader({ comicId, onClose, onOpen }: Props) {
           <PageImage
             key={p}
             url={urls.get(p)}
+            failed={failed.has(p)}
             dims={dims.get(p)}
             crop={crop(p)}
             fit={fit}
