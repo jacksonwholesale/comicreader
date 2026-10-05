@@ -329,27 +329,46 @@ async function openPdf(blob: Blob): Promise<ComicSource> {
   return openPdfWith(() => ({ data }));
 }
 
-type PdfJs = typeof import('pdfjs-dist');
+// The "legacy" build of pdf.js includes fallbacks for older browsers (e.g. iPhones a few iOS
+// versions behind), which the modern build silently fails on.
+type PdfJs = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
 /** Opens a PDF from whatever getDocument() params the caller builds (in-memory bytes, or a range transport). */
 export async function openPdfWith(params: (pdfjs: PdfJs) => object): Promise<ComicSource> {
-  const pdfjs = await import('pdfjs-dist');
-  const { default: workerUrl } = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const { default: workerUrl } = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
   // wasmUrl: JPEG 2000 / JBIG2 decoders (copied to public/pdfjs by scripts/copy-pdf-decoders.mjs)
   const task = pdfjs.getDocument({ wasmUrl: new URL('pdfjs/wasm/', document.baseURI).href, ...params(pdfjs) });
   const doc = await task.promise;
-  const target = Math.min(2400, Math.max(1400, Math.round(screen.height * devicePixelRatio)));
-  const c = urlCache(async (i) => {
+  // Phones (iPhone especially) have a small budget for canvas memory: render a bit smaller there,
+  // one page at a time, and free each canvas as soon as its image is made.
+  const touch = matchMedia('(pointer: coarse)').matches;
+  const target = Math.min(touch ? 2000 : 2400, Math.max(1400, Math.round(screen.height * devicePixelRatio)));
+  const maxPixels = touch ? 5_000_000 : 9_000_000;
+  let queue: Promise<unknown> = Promise.resolve();
+  const render = async (i: number) => {
     const page = await doc.getPage(i + 1);
     const base = page.getViewport({ scale: 1 });
-    const viewport = page.getViewport({ scale: target / base.height });
+    const scale = Math.min(target / base.height, Math.sqrt(maxPixels / (base.width * base.height)));
+    const viewport = page.getViewport({ scale });
     const canvas = document.createElement('canvas');
     canvas.width = Math.ceil(viewport.width);
     canvas.height = Math.ceil(viewport.height);
-    // 'print' intent renders without requestAnimationFrame, so imports keep going in background tabs
-    await page.render({ canvas, viewport, intent: 'print' }).promise;
-    return new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('render failed'))), 'image/jpeg', 0.9));
+    try {
+      // 'print' intent renders without requestAnimationFrame, so imports keep going in background tabs
+      await page.render({ canvas, viewport, intent: 'print' }).promise;
+      return await new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('render failed'))), 'image/jpeg', 0.9));
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+      page.cleanup();
+    }
+  };
+  const c = urlCache((i) => {
+    const job = queue.then(() => render(i));
+    queue = job.catch(() => {});
+    return job;
   }, doc.numPages);
   return {
     format: 'pdf',

@@ -1,9 +1,9 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Cloud, CloudOff, Download, RefreshCw, Upload } from 'lucide-react';
+import { Cloud, CloudOff, ShieldCheck, Download, RefreshCw, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { APP } from '../config';
 import { db, getKV, setKV } from '../db';
-import { connectedEmail, getAccountEmail, getClientId, isConnected, isGoogleReady, prepareGoogle, PopupError, redirectUri, signInWithRedirect } from '../lib/drive';
+import { staysSignedIn, connectedEmail, getAccountEmail, getClientId, isConnected, isGoogleReady, prepareGoogle, PopupError, redirectUri, signInWithRedirect } from '../lib/drive';
 import { formatBytes, timeAgo } from '../lib/library';
 import { setPrefs, usePrefs } from '../lib/prefs';
 import { connectDrive, disconnectDrive, syncNow } from '../lib/sync';
@@ -136,6 +136,7 @@ export function Settings({ notify }: { notify: (m: string) => void }) {
                 <CloudOff size={16} /> Disconnect
               </button>
             </div>
+            <StaySignedIn notify={notify} />
             <DriveFolders notify={notify} onAuthError={onAuthError} />
           </>
         )}
@@ -270,4 +271,45 @@ async function importBackup(file: File) {
   if (data.prefs) setPrefs(JSON.parse(data.prefs));
   if (data.clientId) await setKV('googleClientId', data.clientId);
   markDirty();
+}
+
+/** "Stay signed in": one sign-in through Google's page, then renewals happen on their own. */
+function StaySignedIn({ notify }: { notify: (m: string) => void }) {
+  const [open, setOpen] = useState(false);
+  if (staysSignedIn())
+    return (
+      <p className="muted small stay-ok">
+        <ShieldCheck size={16} className="accent" /> Stays signed in on this device — the connection renews by itself.
+      </p>
+    );
+  return (
+    <div className="notice">
+      <ShieldCheck size={20} className="accent" />
+      <div className="grow">
+        <strong>Stay signed in on this device</strong>
+        <p className="small" style={{ margin: '4px 0 8px' }}>
+          Google's sign-in only lasts an hour, and phones block renewing it in the background — that's why you see “Reconnect”. Sign in once through Google's page
+          and the app renews on its own from then on (a quick bounce through Google, no taps).
+        </p>
+        {!open ? (
+          <button className="btn small primary" onClick={() => setOpen(true)}>Set it up</button>
+        ) : (
+          <>
+            <p className="small" style={{ margin: '0 0 6px' }}>
+              One-time step on your computer: <strong>console.cloud.google.com → APIs &amp; Services → Credentials →</strong> your OAuth client →{' '}
+              <strong>Authorized redirect URIs → Add URI</strong>, paste this, and Save:
+            </p>
+            <div className="row gap">
+              <code className="copy-box grow">{redirectUri()}</code>
+              <button className="btn small" onClick={() => void navigator.clipboard?.writeText(redirectUri()).then(() => notify('Copied'))}>Copy</button>
+            </div>
+            <p className="small" style={{ margin: '8px 0' }}>Already there? (It's the same one used for “Sign in on Google's page”.) Then:</p>
+            <button className="btn small primary" onClick={() => void signInWithRedirect('#/settings').catch((e) => notify((e as Error).message))}>
+              Sign in on Google's page
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }

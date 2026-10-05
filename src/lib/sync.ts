@@ -263,6 +263,11 @@ export async function connectDrive() {
   await syncNow();
 }
 
+/** Silent renewal needed a tap after all: show Reconnect. */
+export function needsReconnect() {
+  setStatus({ state: 'error', message: 'Google needs you to sign in again — tap Reconnect.', needsSignIn: true });
+}
+
 /** After returning from Google's sign-in page (redirect sign-in). */
 export async function afterRedirectSignIn() {
   setStatus({ state: 'idle' });

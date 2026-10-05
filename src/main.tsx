@@ -6,8 +6,8 @@ import { APP } from './config';
 import { go } from './lib/hooks';
 import { importFile } from './lib/importer';
 import { queueImport } from './lib/importQueue';
-import { afterRedirectSignIn, startAutoSync } from './lib/sync';
-import { finishRedirectSignIn, prepareGoogle } from './lib/drive';
+import { afterRedirectSignIn, needsReconnect, startAutoSync } from './lib/sync';
+import { finishRedirectSignIn, prepareGoogle, renewIfExpiring } from './lib/drive';
 import './styles.css';
 
 document.title = APP.name;
@@ -18,10 +18,16 @@ void navigator.storage?.persist?.();
 
 // Coming back from Google's sign-in page (backup sign-in for iPhone home-screen apps)?
 const redirect = finishRedirectSignIn();
-if (redirect.error) sessionStorage.setItem('auth.error', redirect.error);
+if (redirect.error && !redirect.silent) sessionStorage.setItem('auth.error', redirect.error);
 
 startAutoSync();
 if (redirect.done && !redirect.error) void afterRedirectSignIn();
+else if (redirect.silent && redirect.error) needsReconnect();
+// Stay signed in: renew before the hour-long Google token runs out — now, and whenever you come back.
+if (!redirect.done) renewIfExpiring();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') renewIfExpiring();
+});
 // Get Google sign-in ready early, so tapping Connect/Reconnect can open its window instantly.
 void prepareGoogle().catch(() => {});
 

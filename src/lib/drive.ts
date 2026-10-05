@@ -101,6 +101,7 @@ export async function prepareGoogle(clientId?: string): Promise<boolean> {
       waiting?.reject(new PopupError(err?.type === 'popup_failed_to_open' ? 'Failed to open window' : err?.message || err?.type || 'Sign-in cancelled', err?.type)),
   });
   tokenClientFor = id;
+  localStorage.setItem('drive.clientId', id);
   return true;
 }
 
@@ -154,31 +155,83 @@ export function redirectUri() {
   return location.origin + location.pathname;
 }
 
-export async function signInWithRedirect() {
-  const clientId = await getClientId();
-  if (!clientId) throw new Error('Add your Google OAuth Client ID in Settings first.');
+function authUrl(clientId: string, prompt: string, returnTo: string) {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri(),
     response_type: 'token',
     scope: SCOPES,
     include_granted_scopes: 'true',
-    prompt: 'select_account consent',
-    state: 'cr-auth',
+    prompt,
+    // where to land afterwards (the screen you were on)
+    state: `cr-auth|${prompt === 'none' ? 'silent' : 'ask'}|${returnTo}`,
   });
-  location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+  const hint = connectedEmail();
+  if (hint) params.set('login_hint', hint);
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+}
+
+export async function signInWithRedirect(returnTo = '#/settings') {
+  const clientId = await getClientId();
+  if (!clientId) throw new Error('Add your Google OAuth Client ID in Settings first.');
+  location.assign(authUrl(clientId, 'select_account consent', returnTo));
+}
+
+// ---- staying signed in ----
+// Google's tokens last an hour and phones block renewing them in a pop-up. Once you've signed in
+// through Google's page (proving this app's address is registered), the app renews by bouncing
+// through Google with prompt=none: no screen, no tap, back where you were in about a second.
+
+const REDIRECT_OK = 'drive.redirectOk';
+
+export function staysSignedIn() {
+  try {
+    return localStorage.getItem(REDIRECT_OK) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Starts a silent renewal (the page navigates away and comes back). False if not possible right now. */
+export function silentRenew(): boolean {
+  if (!staysSignedIn() || !isConnected() || document.visibilityState !== 'visible' || !navigator.onLine) return false;
+  const clientId = tokenClientFor || localStorage.getItem('drive.clientId');
+  if (!clientId) return false;
+  // never loop: at most one attempt every 2 minutes, and not after Google said a tap is needed
+  const last = Number(sessionStorage.getItem('auth.silentAt')) || 0;
+  if (Date.now() - last < 120_000 || sessionStorage.getItem('auth.silentFailed')) return false;
+  sessionStorage.setItem('auth.silentAt', String(Date.now()));
+  location.replace(authUrl(clientId, 'none', location.hash || '#/'));
+  return true;
+}
+
+/** Renew ahead of time if the token is about to run out (call on launch / when the app comes back). */
+export function renewIfExpiring(minutesLeft = 5) {
+  if (!staysSignedIn() || !isConnected()) return;
+  try {
+    const t = JSON.parse(localStorage.getItem('drive.token') || 'null') as Token | null;
+    if (!t || t.expires - Date.now() < minutesLeft * 60_000) silentRenew();
+  } catch {}
 }
 
 /** On startup: pick up the token Google sends back after a redirect sign-in. Returns an error message, if any. */
-export function finishRedirectSignIn(): { done: boolean; error?: string } {
+export function finishRedirectSignIn(): { done: boolean; error?: string; silent?: boolean } {
   const h = location.hash.replace(/^#/, '');
   if (!/(^|&)(access_token|error)=/.test(h)) return { done: false };
   const q = new URLSearchParams(h);
-  if (q.get('state') !== 'cr-auth') return { done: false };
-  history.replaceState(null, '', `${location.pathname}${location.search}#/settings`);
-  if (q.get('error')) return { done: true, error: q.get('error') === 'access_denied' ? 'Sign-in cancelled' : q.get('error')! };
+  const [tag, mode, returnTo] = (q.get('state') ?? '').split('|');
+  if (tag !== 'cr-auth') return { done: false };
+  const silent = mode === 'silent';
+  history.replaceState(null, '', `${location.pathname}${location.search}${returnTo && returnTo.startsWith('#') ? returnTo : '#/settings'}`);
+  if (q.get('error')) {
+    // silent renewal needs a tap after all (signed out of Google, etc.): show Reconnect, don't retry this session
+    if (silent) sessionStorage.setItem('auth.silentFailed', '1');
+    return { done: true, silent, error: q.get('error') === 'access_denied' ? 'Sign-in cancelled' : q.get('error')! };
+  }
   storeToken(q.get('access_token')!, Number(q.get('expires_in') || 3600), q.get('scope') ?? '');
-  return { done: true };
+  localStorage.setItem(REDIRECT_OK, '1');
+  sessionStorage.removeItem('auth.silentFailed');
+  return { done: true, silent };
 }
 
 /** True once the user has granted read access for linked folders (added after first release). */
@@ -206,6 +259,7 @@ export function disconnect() {
   localStorage.removeItem('drive.connected');
   localStorage.removeItem('drive.email');
   localStorage.removeItem('drive.scopes');
+  localStorage.removeItem(REDIRECT_OK);
 }
 
 export class NeedsSignIn extends Error {
@@ -218,6 +272,8 @@ async function token(): Promise<string> {
   const t = readToken();
   if (t) return t.access;
   if (!isConnected()) throw new NeedsSignIn();
+  // stay signed in: bounce through Google and come back (this page is about to reload)
+  if (silentRenew()) return new Promise<string>(() => {});
   try {
     return await requestToken(false);
   } catch {
