@@ -481,3 +481,15 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .stay-ok { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
 
 .page-failed { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: #aab; font-size: 14px; }
+
+/* phones: keep the library inside the screen, 3 covers per row (desktop unchanged) */
+@media (max-width: 760px) {
+  .main { overflow-x: hidden; }
+  .toolbar { gap: 8px; }
+  /* view switch gets its own full-width line; Select + sort share the next one */
+  .toolbar > .row.gap { width: 100%; flex-wrap: wrap; gap: 8px; min-width: 0; }
+  .toolbar > .row.gap > .segmented { order: -1; flex: 1 1 100%; min-width: 0; }
+  .toolbar > .row.gap > .select { flex: 1 1 0; min-width: 0; }
+  .toolbar > .row.gap > .btn { flex-shrink: 0; }
+  .grid, .grid.wide { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 10px; }
+}
