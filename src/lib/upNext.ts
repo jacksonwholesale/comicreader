@@ -1,5 +1,5 @@
 import type { Collection, Comic, Progress } from '../db';
-import { buildTree } from './folders';
+import { buildTree, type GroupOrder } from './folders';
 import { isReadable, sortComics, statusOf } from './library';
 
 export interface UpNextItem {
@@ -22,6 +22,7 @@ export function computeUpNext(
   progress: Map<string, Progress>,
   collections: Collection[],
   hidden: string[] = [],
+  order: GroupOrder = {},
   limit = 12,
 ): UpNextItem[] {
   const hiddenSet = new Set(hidden);
@@ -32,7 +33,7 @@ export function computeUpNext(
 
   const byId = new Map(comics.map((c) => [c.id, c]));
   const lists = collections.filter((col) => !col.smart && !col.deleted).sort((a, b) => b.updatedAt - a.updatedAt);
-  const seriesNodes = buildTree(comics).folders;
+  const seriesNodes = buildTree(comics, order).folders;
 
   const out: UpNextItem[] = [];
   const doneSequences = new Set<string>();

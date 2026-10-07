@@ -1,4 +1,4 @@
-import { Ungroup, BookOpen, CheckCheck, FolderInput, Pencil, ChevronLeft, Info, ChevronRight, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { ArrowLeftRight, Ungroup, BookOpen, CheckCheck, FolderInput, Pencil, ChevronLeft, Info, ChevronRight, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Comic } from '../db';
 import { ACCEPT, IMAGE_ACCEPT } from '../lib/archive';
@@ -113,7 +113,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
   );
 
   const prefs = usePrefs();
-  const upNext = useMemo(() => computeUpNext(all, progress, collections, prefs.upNextHidden), [all, progress, collections, prefs.upNextHidden]);
+  const upNext = useMemo(() => computeUpNext(all, progress, collections, prefs.upNextHidden, prefs.groupOrder), [all, progress, collections, prefs.upNextHidden, prefs.groupOrder]);
   const [upNextMenu, setUpNextMenu] = useState<{ x: number; y: number; comic: Comic; after: Comic } | null>(null);
   const hideUpNext = (after: Comic, comic: Comic) => {
     const key = upNextKey(after.id, comic.id);
@@ -122,9 +122,28 @@ export function Library({ onDetail, onRead, notify }: Props) {
     notify(`Removed "${comic.title}" from Up next`, { label: 'Undo', run: () => setPrefs({ upNextHidden: getPrefs().upNextHidden.filter((k) => k !== key) }) });
   };
 
-  const tree = useMemo(() => buildTree(visible), [visible]);
+  const tree = useMemo(() => buildTree(visible, prefs.groupOrder), [visible, prefs.groupOrder]);
   // unfiltered, for renames/moves (so filtered-out comics move with their group)
-  const fullTree = useMemo(() => buildTree(all), [all]);
+  const fullTree = useMemo(() => buildTree(all, prefs.groupOrder), [all, prefs.groupOrder]);
+  // Reorder mode: arrows on each cover; the order is also the reading order (Up next follows it)
+  const [arranging, setArranging] = useState(false);
+  const moveItem = (index: number, delta: number) => {
+    // order the full group (so filtered-out items keep their place), using what's shown as the guide
+    const full = groupByKey(here.key) ?? (here.key === fullTree.key ? fullTree : null);
+    if (!full) return;
+    const ids = full.items.map((it) => it.id);
+    const shownIds = here.items.map((it) => it.id);
+    const a = ids.indexOf(shownIds[index]);
+    const b = ids.indexOf(shownIds[index + delta]);
+    if (a < 0 || b < 0) return;
+    [ids[a], ids[b]] = [ids[b], ids[a]];
+    setPrefs({ groupOrder: { ...getPrefs().groupOrder, [here.key]: ids } });
+  };
+  const resetOrder = () => {
+    const { [here.key]: _drop, ...rest } = getPrefs().groupOrder;
+    setPrefs({ groupOrder: rest });
+    notify('Back to the automatic order');
+  };
   const groupByKey = (key: string) => allGroups(fullTree).find((g) => g.key === key);
   const [groupMenu, setGroupMenu] = useState<{ x: number; y: number; key: string } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -423,10 +442,27 @@ export function Library({ onDetail, onRead, notify }: Props) {
               ))}
             </nav>
           )}
-          {!showCollections && grouped && here.folders.length > 0 && (
+          {!showCollections && grouped && (here.items.length > 1 || arranging) && (
+            <div className="arrange-bar">
+              {arranging ? (
+                <>
+                  <span className="muted small grow">Use the arrows to set the order. It's also the reading order Up next follows.</span>
+                  {prefs.groupOrder[here.key] && <button className="btn small ghost" onClick={resetOrder}>Reset order</button>}
+                  <button className="btn small primary" onClick={() => setArranging(false)}>Done</button>
+                </>
+              ) : (
+                <button className="btn small ghost" onClick={() => { endSelect(); setArranging(true); }}>
+                  <ArrowLeftRight size={16} /> Reorder
+                </button>
+              )}
+            </div>
+          )}
+          {!showCollections && grouped && (
             <div className="grid">
-              {here.folders.map((f) => {
-                return (
+              {here.items.map((it, index) => {
+                const f = it.kind === 'group' ? it.node : null;
+                const c = it.kind === 'comic' ? it.comic : null;
+                const card = f ? (
                   <GroupCard
                     key={f.key}
                     group={f}
@@ -438,12 +474,33 @@ export function Library({ onDetail, onRead, notify }: Props) {
                     onOpen={() => setFolderPath([...trail.slice(1).map((n) => n.key), f.key])}
                     onMenu={(x, y) => setGroupMenu({ x, y, key: f.key })}
                   />
+                ) : (
+                  <ComicCard
+                    key={c!.id}
+                    comic={c!}
+                    progress={progress.get(c!.id)}
+                    selecting={selecting}
+                    selected={selected.has(c!.id)}
+                    onOpen={() => open(c!)}
+                    onSelect={() => (selecting ? toggle(c!.id) : onDetail(c!))}
+                    onMenu={(x, y) => setComicMenu({ x, y, comic: c! })}
+                  />
+                );
+                if (!arranging) return <div key={it.id} className="grid-cell">{card}</div>;
+                return (
+                  <div key={it.id} className="grid-cell arranging">
+                    <div className="arrange-lock">{card}</div>
+                    <div className="arrange-controls">
+                      <span className="arrange-pos">{index + 1}</span>
+                      <button className="icon-btn tiny" aria-label="Earlier" disabled={index === 0} onClick={() => moveItem(index, -1)}><ChevronLeft size={18} /></button>
+                      <button className="icon-btn tiny" aria-label="Later" disabled={index === here.items.length - 1} onClick={() => moveItem(index, 1)}><ChevronRight size={18} /></button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
           )}
-          {grouped && here.folders.length > 0 && shown.length > 0 && <div className="grid-gap" />}
-          {!showCollections && shown.length > 0 && (
+          {!showCollections && !grouped && shown.length > 0 && (
             <div className="grid">
               {shown.map((c) => (
                 <ComicCard

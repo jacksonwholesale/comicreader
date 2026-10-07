@@ -17,7 +17,16 @@ export interface FolderNode {
   comics: Comic[];
   all: Comic[]; // every comic in this subtree, in reading order
   custom: boolean; // contains comics you've arranged yourself
+  /** groups and comics in display = reading order (your custom order if you've set one) */
+  items: TreeItem[];
 }
+
+export type TreeItem = { id: string; kind: 'group'; node: FolderNode } | { id: string; kind: 'comic'; comic: Comic };
+
+/** Custom order per group: group key → item ids ("g:<name>" for sub-groups, "c:<comic id>" for comics). */
+export type GroupOrder = Record<string, string[]>;
+export const groupItemId = (node: FolderNode) => `g:${node.name.toLowerCase()}`;
+export const comicItemId = (c: Comic) => `c:${c.id}`;
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
@@ -46,7 +55,7 @@ export function placeOf(c: Comic): string[] {
   return [c.series || 'Unsorted']; // comics imported on a device: by series name
 }
 
-export function buildTree(comics: Comic[]): FolderNode {
+export function buildTree(comics: Comic[], order: GroupOrder = {}): FolderNode {
   const root = raw('Library');
   for (const c of comics) {
     const custom = c.shelf !== undefined;
@@ -59,7 +68,7 @@ export function buildTree(comics: Comic[]): FolderNode {
     }
     node.comics.push(c);
   }
-  return finish(root, '', []);
+  return finish(root, '', [], order);
 }
 
 function groupVolumes(node: Raw, isRoot: boolean) {
@@ -86,19 +95,34 @@ function groupVolumes(node: Raw, isRoot: boolean) {
   }
 }
 
-function finish(node: Raw, parentKey: string, parentPath: string[]): FolderNode {
+function finish(node: Raw, parentKey: string, parentPath: string[], order: GroupOrder): FolderNode {
   groupVolumes(node, !parentKey);
   const key = parentKey ? `${parentKey}/${node.name}` : node.name;
   const path = parentKey ? [...parentPath, node.name] : [];
-  const folders = [...node.folders.values()].sort((a, b) => collator.compare(a.name, b.name)).map((f) => finish(f, key, path));
+  const folders = [...node.folders.values()].sort((a, b) => collator.compare(a.name, b.name)).map((f) => finish(f, key, path, order));
   const comics = sortComics(node.comics, 'series');
+  // default: sub-groups (by name) then comics (by series/issue); your saved order wins, and anything
+  // new that isn't in it yet keeps its default place at the end
+  let items: TreeItem[] = [
+    ...folders.map((f) => ({ id: groupItemId(f), kind: 'group' as const, node: f })),
+    ...comics.map((c) => ({ id: comicItemId(c), kind: 'comic' as const, comic: c })),
+  ];
+  const saved = order[key];
+  if (saved?.length) {
+    const rank = new Map(saved.map((id, i) => [id, i]));
+    items = items
+      .map((it, i) => ({ it, r: rank.get(it.id) ?? saved.length + i }))
+      .sort((a, b) => a.r - b.r)
+      .map((x) => x.it);
+  }
   return {
     key,
     name: node.name,
     path,
     folders,
     comics,
-    all: [...folders.flatMap((f) => f.all), ...comics],
+    items,
+    all: items.flatMap((it) => (it.kind === 'group' ? it.node.all : [it.comic])),
     custom: node.custom || folders.some((f) => f.custom),
   };
 }

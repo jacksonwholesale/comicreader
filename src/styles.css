@@ -497,3 +497,14 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 /* drop zone for moving things out of the group you're in */
 .drag-out-bar { position: fixed; left: 50%; top: calc(14px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 110; padding: 14px 22px; border-radius: 14px; border: 2px dashed var(--accent); background: var(--surface); color: var(--text); font-weight: 700; box-shadow: var(--shadow); white-space: nowrap; }
 .drag-out-bar.drop-over { background: var(--accent); color: var(--accent-ink); border-style: solid; }
+
+/* reorder mode in the Series view */
+.arrange-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: -6px 0 12px; }
+.grid-cell { min-width: 0; display: flex; }
+.grid-cell > .card { width: 100%; }
+.grid-cell.arranging { flex-direction: column; gap: 6px; }
+.arrange-lock { pointer-events: none; opacity: 0.85; }
+.arrange-lock .card { width: 100%; }
+.arrange-controls { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.arrange-controls .icon-btn { border: 1px solid var(--line); }
+.arrange-pos { min-width: 22px; text-align: center; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }

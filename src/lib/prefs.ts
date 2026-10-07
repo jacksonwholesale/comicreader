@@ -27,6 +27,7 @@ export interface Prefs {
   guidedShowFullPageFirst: boolean;
   theme: 'dark' | 'light' | 'system';
   upNextHidden: string[]; // "afterId>nextId" suggestions you removed from Up next (synced with prefs)
+  groupOrder: Record<string, string[]>; // your order inside Series groups = reading order (synced with prefs)
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -49,6 +50,7 @@ export const DEFAULT_PREFS: Prefs = {
   guidedShowFullPageFirst: true,
   theme: 'dark',
   upNextHidden: [],
+  groupOrder: {},
 };
 
 const KEY = 'prefs.v1';
