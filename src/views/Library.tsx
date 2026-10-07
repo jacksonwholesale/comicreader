@@ -1,4 +1,4 @@
-import { BookOpen, CheckCheck, FolderInput, Pencil, ChevronLeft, Info, ChevronRight, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { Ungroup, BookOpen, CheckCheck, FolderInput, Pencil, ChevronLeft, Info, ChevronRight, CloudDownload, HardDriveDownload, FilePlus2, FolderOpen, FolderPlus, Library as LibraryIcon, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Comic } from '../db';
 import { ACCEPT, IMAGE_ACCEPT } from '../lib/archive';
@@ -16,7 +16,7 @@ import { ComicCard } from '../components/ComicCard';
 import { AddToCollection } from '../components/AddToCollection';
 import { ContextMenu } from '../components/ContextMenu';
 import { GroupCard } from '../components/GroupCard';
-import { setDropHandler, type DragPayload } from '../lib/dnd';
+import { setDropHandler, useDragState, type DragPayload } from '../lib/dnd';
 import { CollectionsGrid } from './Collections';
 import type { Notify } from '../App';
 
@@ -163,6 +163,14 @@ export function Library({ onDetail, onRead, notify }: Props) {
         notify(`Added ${what} to ${col.name}`);
       } else if (target === 'newcol') {
         setDropNew(p);
+      } else if (target === 'up') {
+        // dragged onto "move out of this group"
+        const parent = here.path.slice(0, -1);
+        if (p.kind === 'group') await moveGroup(p.key, parent);
+        else {
+          await setShelves(p.ids.map((id) => ({ id, shelf: parent })));
+          notify(`Moved ${what} out of "${here.name}"`);
+        }
       } else if (target.startsWith('group:')) {
         const key = target.slice(6);
         if (p.kind === 'group' && (key === p.key || key.startsWith(`${p.key}/`))) return; // onto itself
@@ -177,6 +185,28 @@ export function Library({ onDetail, onRead, notify }: Props) {
     });
     return () => setDropHandler(null);
   });
+
+  // Ungroup: everything inside moves up one level and the group disappears.
+  const ungroup = async (key: string) => {
+    const g = groupByKey(key);
+    if (!g) return;
+    const paths = shownPaths(fullTree);
+    const depth = g.path.length - 1;
+    await setShelves(g.all.map((c) => {
+      const p = paths.get(c.id)!;
+      return { id: c.id, shelf: [...p.slice(0, depth), ...p.slice(depth + 1)] };
+    }));
+    // if you were inside the group you just dissolved, step out to its parent; otherwise stay put
+    if (folderPath.includes(key)) setFolderPath(folderPath.slice(0, folderPath.indexOf(key)));
+    notify(`Ungrouped "${g.name}"`);
+  };
+  // Move comics one level up, out of the group they're shown in.
+  const moveOutOfGroup = async (ids: string[]) => {
+    const paths = shownPaths(fullTree);
+    await setShelves(ids.map((id) => ({ id, shelf: (paths.get(id) ?? []).slice(0, -1) })));
+  };
+  const [comicMenu, setComicMenu] = useState<{ x: number; y: number; comic: Comic } | null>(null);
+  const [addingIds, setAddingIds] = useState<string[] | null>(null);
 
   const resetGroup = async (key: string) => {
     const g = groupByKey(key);
@@ -341,7 +371,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
           {showCollections && (
             <>
               <CollectionsGrid query={query} fromLibrary newCard />
-              {looseTree.folders.length > 0 && (
+              {(looseTree.folders.length > 0 || looseTree.comics.length > 0) && (
                 <section className="loose">
                   <div className="shelf-head">
                     <h2>Not in a collection</h2>
@@ -362,6 +392,18 @@ export function Library({ onDetail, onRead, notify }: Props) {
                           setFolderPath([g.key]);
                         }}
                         onMenu={(x, y) => setGroupMenu({ x, y, key: g.key })}
+                      />
+                    ))}
+                    {looseTree.comics.map((c) => (
+                      <ComicCard
+                        key={c.id}
+                        comic={c}
+                        progress={progress.get(c.id)}
+                        selecting={selecting}
+                        selected={selected.has(c.id)}
+                        onOpen={() => open(c)}
+                        onSelect={() => (selecting ? toggle(c.id) : onDetail(c))}
+                        onMenu={(x, y) => setComicMenu({ x, y, comic: c })}
                       />
                     ))}
                   </div>
@@ -401,7 +443,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
             </div>
           )}
           {grouped && here.folders.length > 0 && shown.length > 0 && <div className="grid-gap" />}
-          {!showCollections && (!grouped || !atTop || here.folders.length === 0) && (
+          {!showCollections && shown.length > 0 && (
             <div className="grid">
               {shown.map((c) => (
                 <ComicCard
@@ -412,11 +454,13 @@ export function Library({ onDetail, onRead, notify }: Props) {
                   selected={selected.has(c.id)}
                   onOpen={() => open(c)}
                   onSelect={() => (selecting ? toggle(c.id) : onDetail(c))}
+                  onMenu={(x, y) => setComicMenu({ x, y, comic: c })}
                 />
               ))}
             </div>
           )}
           {!showCollections && !visible.length && <p className="muted center pad">Nothing matches.</p>}
+          {grouped && !atTop && <DragOutBar groupName={here.name} />}
         </>
       )}
 
@@ -478,6 +522,27 @@ export function Library({ onDetail, onRead, notify }: Props) {
           ]}
         />
       )}
+      {comicMenu && (() => {
+        const c = comicMenu.comic;
+        const inGroup = (shownPaths(fullTree).get(c.id) ?? []).at(-1);
+        return (
+          <ContextMenu
+            x={comicMenu.x}
+            y={comicMenu.y}
+            onClose={() => setComicMenu(null)}
+            items={[
+              ...(isReadable(c) ? [{ label: 'Read', icon: <BookOpen size={16} />, onClick: () => open(c) }] : []),
+              { label: 'Details', icon: <Info size={16} />, onClick: () => onDetail(c) },
+              ...(inGroup
+                ? [{ label: `Remove from "${inGroup}"`, icon: <X size={16} />, onClick: () => void moveOutOfGroup([c.id]).then(() => notify(`Moved "${c.title}" out of "${inGroup}"`)) }]
+                : []),
+              { label: 'Move to…', icon: <FolderInput size={16} />, onClick: () => setMoving({ ids: [c.id] }) },
+              { label: 'Add to collection', icon: <FolderPlus size={16} />, onClick: () => setAddingIds([c.id]) },
+            ]}
+          />
+        );
+      })()}
+      {addingIds && <AddToCollection comicIds={addingIds} onClose={() => setAddingIds(null)} notify={notify} />}
       {groupMenu && (
         <ContextMenu
           x={groupMenu.x}
@@ -486,6 +551,7 @@ export function Library({ onDetail, onRead, notify }: Props) {
           items={[
             { label: 'Rename', icon: <Pencil size={16} />, onClick: () => setRenaming(groupMenu.key) },
             { label: 'Move into…', icon: <FolderInput size={16} />, onClick: () => setMoving({ group: groupMenu.key }) },
+            { label: 'Ungroup', icon: <Ungroup size={16} />, onClick: () => void ungroup(groupMenu.key) },
             ...(groupByKey(groupMenu.key)?.custom
               ? [{ label: "Use Drive's layout", icon: <RotateCcw size={16} />, onClick: () => void resetGroup(groupMenu.key) }]
               : []),
@@ -507,12 +573,12 @@ export function Library({ onDetail, onRead, notify }: Props) {
           title={moving.group ? `Move "${groupByKey(moving.group)?.name}" into…` : `Move ${moving.ids!.length} comic${moving.ids!.length === 1 ? '' : 's'} to…`}
           tree={fullTree}
           excludeKey={moving.group}
-          allowTop={!!moving.group}
+          allowTop
           onPick={(path) => {
             if (moving.group) void moveGroup(moving.group, path);
             else
               void setShelves(moving.ids!.map((id) => ({ id, shelf: path }))).then(() => {
-                notify(`Moved to "${path[path.length - 1]}"`);
+                notify(path.length ? `Moved to "${path[path.length - 1]}"` : 'Moved to the top of the library');
                 endSelect();
               });
           }}
@@ -555,6 +621,17 @@ function EmptyLibrary({ onFiles, onFolder }: { onFiles: () => void; onFolder: ()
         <button className="btn" onClick={onFolder}><FolderOpen size={18} /> Add a folder</button>
       </div>
       <p className="muted small">CBZ · CBR · CB7 · CBT · PDF · EPUB · ZIP/RAR/7z/TAR · folders of JPG/PNG/WebP/AVIF images</p>
+    </div>
+  );
+}
+
+/** While dragging inside a group: drop here to move it out (one level up). */
+function DragOutBar({ groupName }: { groupName: string }) {
+  const drag = useDragState();
+  if (!drag) return null;
+  return (
+    <div className="drag-out-bar" data-drop="up">
+      ⬆ Drop here to move out of “{groupName}”
     </div>
   );
 }

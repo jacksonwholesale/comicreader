@@ -427,7 +427,7 @@ export function parseFileName(fileName: string): ComicInfo {
   const year = base.match(/\((\d{4})\)/)?.[1];
   base = base.replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
   // Take the volume out first so "Berserk Vol 3" is volume 3, not issue #3.
-  const volMatch = base.match(/\b(?:v|vol\.?|volume)\s*(\d+)/i);
+  const volMatch = base.match(/\b(?:v|vol|volume)\s*\.?\s*(\d+)/i); // also "Vol . 1"
   const vol = volMatch?.[1];
   const rest = volMatch ? base.replace(volMatch[0], ' ').replace(/\s+/g, ' ').trim() : base;
   const num = rest.match(/(?:#|\b)(\d{1,4}(?:\.\d+)?)\s*$/)?.[1] ?? rest.match(/#(\d{1,4}(?:\.\d+)?)/)?.[1];

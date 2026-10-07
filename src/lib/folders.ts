@@ -38,14 +38,18 @@ interface Raw {
 const raw = (name: string): Raw => ({ name, folders: new Map(), comics: [], custom: false });
 
 export function placeOf(c: Comic): string[] {
-  if (c.shelf?.length) return c.shelf;
-  return c.drivePath?.length ? c.drivePath : [c.series || 'Unsorted'];
+  if (c.shelf) return c.shelf; // your arrangement; [] = loose at the top level
+  if (c.drivePath?.length) return c.drivePath;
+  // Loose in a linked Drive folder: loose here too, like in Drive. (Guessing a series name used to
+  // merge these into any real folder that happened to share the name.)
+  if (c.driveFolderId) return [];
+  return [c.series || 'Unsorted']; // comics imported on a device: by series name
 }
 
 export function buildTree(comics: Comic[]): FolderNode {
   const root = raw('Library');
   for (const c of comics) {
-    const custom = !!c.shelf?.length;
+    const custom = c.shelf !== undefined;
     let node = root;
     for (const seg of placeOf(c)) {
       let next = node.folders.get(seg.toLowerCase());
@@ -69,10 +73,10 @@ function groupVolumes(node: Raw, isRoot: boolean) {
   for (const [key, vols] of bySeries) {
     // Already inside that series' node (we just grouped these, or the Drive folder is named after it).
     if (node.name.toLowerCase() === key) continue;
-    const existing = node.folders.get(key);
-    // Group when there are several volumes, or a folder/series of that exact name already exists.
-    if (vols.length < 2 && !existing) continue;
-    const parent = existing ?? raw(volumeSeries(vols[0].name)!);
+    // Only gather several volumes into a new group of their own; never pour them into an existing
+    // folder that happens to share the series name (that's how things ended up with unrelated books).
+    if (vols.length < 2 || node.folders.has(key)) continue;
+    const parent = raw(volumeSeries(vols[0].name)!);
     for (const v of vols) {
       if (v === parent) continue;
       node.folders.delete(v.name.toLowerCase());

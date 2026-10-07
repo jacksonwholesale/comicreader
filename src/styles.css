@@ -493,3 +493,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
   .toolbar > .row.gap > .btn { flex-shrink: 0; }
   .grid, .grid.wide { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 10px; }
 }
+
+/* drop zone for moving things out of the group you're in */
+.drag-out-bar { position: fixed; left: 50%; top: calc(14px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 110; padding: 14px 22px; border-radius: 14px; border: 2px dashed var(--accent); background: var(--surface); color: var(--text); font-weight: 700; box-shadow: var(--shadow); white-space: nowrap; }
+.drag-out-bar.drop-over { background: var(--accent); color: var(--accent-ink); border-style: solid; }

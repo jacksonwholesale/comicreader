@@ -9,7 +9,7 @@ export async function setShelves(updates: { id: string; shelf: string[] | undefi
   if (!updates.length) return;
   const now = Date.now();
   await db.transaction('rw', db.comics, async () => {
-    for (const u of updates) await db.comics.update(u.id, { shelf: u.shelf?.map((s) => s.trim()).filter(Boolean), updatedAt: now });
+    for (const u of updates) await db.comics.update(u.id, { shelf: u.shelf ? u.shelf.map((s) => s.trim()).filter(Boolean) : undefined, updatedAt: now });
   });
   markDirty();
 }
